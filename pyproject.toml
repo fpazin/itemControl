@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "itemcontrol"
+version = "0.1.0"
+description = "Desktop inventory control for IT assets across countries and locations"
+requires-python = ">=3.10"
+dependencies = ["PySide6>=6.6"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+src/itemcontrol/__init__.py
+src/itemcontrol/__main__.py
+src/itemcontrol/domain.py
+src/itemcontrol/repository.py
+src/itemcontrol/service.py
+src/itemcontrol/ui.py
+src/itemcontrol.egg-info/PKG-INFO
+src/itemcontrol.egg-info/SOURCES.txt
+src/itemcontrol.egg-info/dependency_links.txt
+src/itemcontrol.egg-info/requires.txt
+src/itemcontrol.egg-info/top_level.txt
+tests/test_service.py

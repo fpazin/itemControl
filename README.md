@@ -1,4 +1,4 @@
-# itemControl
+# ITemControl
 
 Aplicativo desktop em Python para controle de ativos de TI entre países e localidades.
 

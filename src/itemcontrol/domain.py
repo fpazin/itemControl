@@ -15,6 +15,10 @@ class NotFoundError(ItemControlError):
     """Raised when a referenced record does not exist."""
 
 
+class DatabaseOpenError(ItemControlError):
+    """Raised when a database cannot be opened or unlocked."""
+
+
 @dataclass(frozen=True)
 class Country:
     id: int

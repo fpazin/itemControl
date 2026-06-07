@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication,
-    QTableWidget,
-    QTableWidgetItem,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -19,21 +21,174 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from .domain import ItemControlError
+from .database import encrypt_plaintext_database
 from .repository import SQLiteRepository
 from .service import InventoryService
+from .settings import add_recent_database, load_recent_databases
+
+
+class PasswordConfirmationDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Senha da base")
+
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.Password)
+        self.confirm_password_input = QLineEdit()
+        self.confirm_password_input.setEchoMode(QLineEdit.Password)
+
+        form = QFormLayout()
+        form.addRow("Senha", self.password_input)
+        form.addRow("Confirmar senha", self.confirm_password_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def password(self) -> str:
+        return self.password_input.text()
+
+    def accept(self) -> None:
+        if not self.password_input.text().strip():
+            QMessageBox.warning(self, "ItemControl", "Informe uma senha.")
+            return
+        if self.password_input.text() != self.confirm_password_input.text():
+            QMessageBox.warning(self, "ItemControl", "As senhas nao conferem.")
+            return
+        super().accept()
+
+
+class DatabaseSelectionDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Abrir base de dados")
+        self.resize(560, 360)
+        self.database_path: str | None = None
+        self.database_password: str | None = None
+
+        self.recent_list = QListWidget()
+        for database_path in load_recent_databases():
+            self.recent_list.addItem(database_path)
+        self.recent_list.itemClicked.connect(
+            lambda item: self.path_input.setText(item.text())
+        )
+        self.recent_list.itemDoubleClicked.connect(lambda item: self.open_existing())
+
+        self.path_input = QLineEdit("itemcontrol.sqlite3")
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.Password)
+        self.confirm_password_input = QLineEdit()
+        self.confirm_password_input.setEchoMode(QLineEdit.Password)
+
+        browse_button = QPushButton("Procurar")
+        browse_button.clicked.connect(self.browse_existing)
+        new_button = QPushButton("Nova base")
+        new_button.clicked.connect(self.create_new)
+        open_button = QPushButton("Abrir")
+        open_button.clicked.connect(self.open_existing)
+        cancel_button = QPushButton("Cancelar")
+        cancel_button.clicked.connect(self.reject)
+
+        path_row = QHBoxLayout()
+        path_row.addWidget(self.path_input)
+        path_row.addWidget(browse_button)
+
+        form = QFormLayout()
+        form.addRow("Arquivo", path_row)
+        form.addRow("Senha", self.password_input)
+        form.addRow("Confirmar senha", self.confirm_password_input)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(open_button)
+        buttons.addWidget(new_button)
+        buttons.addWidget(cancel_button)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Bases recentes"))
+        layout.addWidget(self.recent_list)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+
+    def browse_existing(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Abrir base de dados",
+            "",
+            "SQLite databases (*.sqlite3 *.db);;All files (*)",
+        )
+        if filename:
+            self.path_input.setText(filename)
+
+    def create_new(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Criar base de dados",
+            self.path_input.text() or "itemcontrol.sqlite3",
+            "SQLite databases (*.sqlite3 *.db);;All files (*)",
+        )
+        if not filename:
+            return
+        if Path(filename).exists():
+            QMessageBox.warning(self, "ItemControl", "O arquivo escolhido ja existe.")
+            return
+        if self.password_input.text() != self.confirm_password_input.text():
+            QMessageBox.warning(self, "ItemControl", "As senhas nao conferem.")
+            return
+        try:
+            repository = SQLiteRepository(filename, self.password_input.text() or None)
+            repository.close()
+        except ItemControlError as exc:
+            QMessageBox.warning(self, "ItemControl", str(exc))
+            return
+        self._accept_database(filename, self.password_input.text() or None)
+
+    def open_existing(self) -> None:
+        filename = self.path_input.text().strip()
+        if not filename:
+            QMessageBox.warning(self, "ItemControl", "Escolha uma base de dados.")
+            return
+        if not Path(filename).exists():
+            QMessageBox.warning(self, "ItemControl", "A base escolhida nao existe.")
+            return
+        try:
+            repository = SQLiteRepository(filename, self.password_input.text() or None)
+            repository.close()
+        except ItemControlError as exc:
+            QMessageBox.warning(self, "ItemControl", str(exc))
+            return
+        self._accept_database(filename, self.password_input.text() or None)
+
+    def _accept_database(self, database_path: str, password: str | None) -> None:
+        self.database_path = database_path
+        self.database_password = password
+        add_recent_database(database_path)
+        self.accept()
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, service: InventoryService) -> None:
+    def __init__(
+        self,
+        service: InventoryService,
+        database_path: str,
+        database_password: str | None = None,
+    ) -> None:
         super().__init__()
         self.service = service
-        self.setWindowTitle("ItemControl")
+        self.database_path = database_path
+        self.database_password = database_password
+        self.setWindowTitle(f"ItemControl - {database_path}")
         self.resize(1150, 780)
 
         self.status_area = QTextEdit()
@@ -88,7 +243,13 @@ class MainWindow(QMainWindow):
         self.item_distribution_button.clicked.connect(self.refresh_item_distribution)
 
         self._build_tabs()
+        self._build_menu()
         self.refresh_all()
+
+    def _build_menu(self) -> None:
+        database_menu = self.menuBar().addMenu("Base de dados")
+        protect_action = database_menu.addAction("Proteger base...")
+        protect_action.triggered.connect(self.protect_database)
 
     def _build_tabs(self) -> None:
         registration = QWidget()
@@ -178,6 +339,57 @@ class MainWindow(QMainWindow):
 
     def show_info(self, message: str) -> None:
         self.status_area.append(message)
+
+    def protect_database(self) -> None:
+        if self.database_password:
+            self.show_error("Esta base ja esta protegida por senha.")
+            return
+
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Salvar copia protegida",
+            "",
+            "SQLite databases (*.sqlite3 *.db);;All files (*)",
+        )
+        if not target:
+            return
+        if str(target) == str(self.database_path):
+            self.show_error("Escolha um arquivo diferente da base atual.")
+            return
+
+        password_dialog = PasswordConfirmationDialog(self)
+        if password_dialog.exec() != QDialog.Accepted:
+            return
+        password = password_dialog.password()
+
+        try:
+            encrypt_plaintext_database(self.database_path, target, password)
+        except ItemControlError as exc:
+            self.show_error(str(exc))
+            return
+
+        add_recent_database(target)
+        answer = QMessageBox.question(
+            self,
+            "ItemControl",
+            "Copia protegida criada com sucesso. Deseja abrir essa base agora?",
+        )
+        if answer != QMessageBox.Yes:
+            self.show_info("Copia protegida criada com sucesso.")
+            return
+
+        try:
+            self.service.repository.close()
+            repository = SQLiteRepository(target, password)
+            self.service = InventoryService(repository)
+        except ItemControlError as exc:
+            self.show_error(str(exc))
+            return
+        self.database_path = target
+        self.database_password = password
+        self.setWindowTitle(f"ItemControl - {target}")
+        self.refresh_all()
+        self.show_info("Base protegida aberta com sucesso.")
 
     def _selected_id(self, combo: QComboBox) -> int | None:
         data = combo.currentData()
@@ -431,15 +643,24 @@ class MainWindow(QMainWindow):
 
 def build_application(
     database_path: str = "itemcontrol.sqlite3",
-) -> tuple[QApplication, MainWindow]:
+    database_password: str | None = None,
+) -> tuple[QApplication, MainWindow | None]:
     app = QApplication.instance() or QApplication(sys.argv)
-    repository = SQLiteRepository(database_path)
+    if database_path == "itemcontrol.sqlite3" and database_password is None:
+        dialog = DatabaseSelectionDialog()
+        if dialog.exec() != QDialog.Accepted or dialog.database_path is None:
+            return app, None
+        database_path = dialog.database_path
+        database_password = dialog.database_password
+    repository = SQLiteRepository(database_path, database_password)
     service = InventoryService(repository)
-    window = MainWindow(service)
+    window = MainWindow(service, database_path, database_password)
     return app, window
 
 
 def main() -> int:
     app, window = build_application()
+    if window is None:
+        return 0
     window.show()
     return app.exec()

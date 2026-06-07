@@ -5,14 +5,35 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from .database import open_database_connection
+from .domain import DatabaseOpenError
+
+
+def _dict_row_factory(cursor, row):
+    return {column[0]: row[index] for index, column in enumerate(cursor.description)}
+
 
 class SQLiteRepository:
-    def __init__(self, database_path: str | Path = "itemcontrol.sqlite3") -> None:
+    def __init__(
+        self,
+        database_path: str | Path = "itemcontrol.sqlite3",
+        password: str | None = None,
+    ) -> None:
         self.database_path = Path(database_path)
-        self.connection = sqlite3.connect(self.database_path)
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA foreign_keys = ON")
-        self.ensure_schema()
+        self.password_protected = bool(password)
+        try:
+            self.connection = open_database_connection(self.database_path, password)
+            self.connection.row_factory = _dict_row_factory
+            self.connection.execute("PRAGMA foreign_keys = ON")
+            self.ensure_schema()
+        except DatabaseOpenError:
+            if hasattr(self, "connection"):
+                self.connection.close()
+            raise
+        except Exception as exc:
+            if hasattr(self, "connection"):
+                self.connection.close()
+            raise DatabaseOpenError(f"Could not open database: {exc}") from exc
 
     def close(self) -> None:
         self.connection.close()

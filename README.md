@@ -16,6 +16,19 @@ python -m itemcontrol
 python -m unittest discover -s tests
 ```
 
+## Bases protegidas / Protected databases
+
+Ao iniciar, o app permite escolher uma base existente, criar uma nova base ou abrir
+uma base protegida por senha. Bases novas podem ser criadas sem senha ou com
+criptografia SQLCipher.
+
+- Senhas nao sao salvas pelo app.
+- Apenas caminhos de bases recentes sao gravados nas configuracoes locais.
+- Bases SQLite antigas sem senha continuam abrindo normalmente.
+- Use o menu `Base de dados > Proteger base...` para criar uma copia criptografada
+  da base atual.
+- Se a senha de uma base criptografada for perdida, a base nao podera ser aberta.
+
 ## Controle de versão / Version control
 
 Este projeto usa Git Flow com versionamento SemVer.

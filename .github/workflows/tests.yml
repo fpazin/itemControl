@@ -35,5 +35,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Run tests
-        run: python -m unittest discover -s tests
+      - name: Run inventory tests
+        run: python -m unittest discover -s tests -p "test_service.py" -v
+
+      - name: Run database tests
+        run: python -m unittest discover -s tests -p "test_database.py" -v
+
+      - name: Run About page tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -p "test_about.py" -v
+
+      - name: Run release tooling tests
+        run: python -m unittest discover -s tests -p "test_release_tools.py" -v

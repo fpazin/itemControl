@@ -1,4 +1,4 @@
-# ITemControl
+# ItemControl
 
 Aplicativo desktop em Python para controle de ativos de TI entre países e localidades.
 
@@ -15,6 +15,17 @@ python -m itemcontrol
 ```bash
 python -m unittest discover -s tests
 ```
+
+## Versoes e downloads / Releases and downloads
+
+Os executaveis Windows x64 portateis e as principais mudancas de cada versao
+estao disponiveis em:
+
+- https://github.com/fpazin/itemControl/releases
+- [CHANGELOG.md](CHANGELOG.md)
+
+O executavel nao precisa de instalacao. Baixe o arquivo da versao desejada e
+execute-o diretamente.
 
 ## Bases protegidas / Protected databases
 
@@ -39,8 +50,8 @@ Este projeto usa Git Flow com versionamento SemVer.
 - `release/x.y.z`: preparação de uma versão, incluindo ajuste de versão e validação final.
 - `hotfix/x.y.z`: correção urgente criada a partir de `main` e depois integrada em `develop`.
 
-As versões seguem SemVer (`MAJOR.MINOR.PATCH`) e devem manter `pyproject.toml` e
-`src/itemcontrol/__init__.py` sincronizados antes de criar a tag Git.
+As versões seguem SemVer (`MAJOR.MINOR.PATCH`). A fonte unica da versao e
+`src/itemcontrol/__init__.py`; o `pyproject.toml` le esse valor dinamicamente.
 
 ### Comandos principais
 

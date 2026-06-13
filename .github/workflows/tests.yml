@@ -41,10 +41,26 @@ jobs:
       - name: Run database tests
         run: python -m unittest discover -s tests -p "test_database.py" -v
 
-      - name: Run About page tests
+      - name: Test About page content
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -p "test_about.py" -v
+        run: >-
+          python -m unittest discover -s tests -p "test_about.py"
+          -k test_about_tab_displays_version_and_developer -v
+
+      - name: Test About page links
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python -m unittest discover -s tests -p "test_about.py"
+          -k test_about_links_use_expected_github_urls -v
+
+      - name: Test package version metadata
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python -m unittest discover -s tests -p "test_about.py"
+          -k test_package_metadata_uses_the_runtime_version -v
 
       - name: Run release tooling tests
         run: python -m unittest discover -s tests -p "test_release_tools.py" -v

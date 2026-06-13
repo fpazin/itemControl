@@ -1,19 +1,20 @@
 import importlib.metadata
-import inspect
 import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from itemcontrol import __version__
 from itemcontrol.about import about_details
-from itemcontrol.ui import MainWindow
 
 
 class AboutPageTests(unittest.TestCase):
     def test_about_tab_displays_version_and_developer(self) -> None:
-        tab_source = inspect.getsource(MainWindow._build_tabs)
+        tab_source = (PROJECT_ROOT / "src" / "itemcontrol" / "ui.py").read_text(
+            encoding="utf-8"
+        )
         details = about_details()
 
         self.assertIn('self.tabs.addTab(self.about_page, "Sobre")', tab_source)

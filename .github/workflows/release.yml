@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows-portable:
+    name: Windows x64 portable
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out release tooling
+        uses: actions/checkout@v6
+        with:
+          path: tooling
+
+      - name: Check out release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          path: source
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          architecture: x64
+
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          if (-not $env:RELEASE_TAG.StartsWith("v")) {
+            throw "Release tag must start with v."
+          }
+          $version = $env:RELEASE_TAG.Substring(1)
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ARTIFACT=ItemControl-v$version-windows-x64.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./source
+          python -m pip install "pyinstaller>=6,<7"
+
+      - name: Run tests
+        run: python -m unittest discover -s source/tests
+
+      - name: Build portable executable
+        run: >-
+          python tooling/tools/build_release.py
+          --source source
+          --version $env:RELEASE_VERSION
+          --output dist
+
+      - name: Validate portable executable
+        shell: pwsh
+        run: |
+          & ".\dist\$env:ARTIFACT" --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Portable executable version check failed."
+          }
+
+      - name: Extract release notes
+        run: >-
+          python tooling/tools/release_notes.py
+          --changelog tooling/CHANGELOG.md
+          --version $env:RELEASE_VERSION
+          --output release-notes.md
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        working-directory: tooling
+        run: |
+          $asset = "..\dist\$env:ARTIFACT"
+          $notes = "..\release-notes.md"
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $env:RELEASE_TAG --title "ItemControl $env:RELEASE_VERSION" --notes-file $notes
+            gh release upload $env:RELEASE_TAG $asset --clobber
+          } else {
+            $latest = if ($env:RELEASE_TAG -eq "v0.1.0") { "--latest=false" } else { "--latest" }
+            gh release create $env:RELEASE_TAG $asset --verify-tag --title "ItemControl $env:RELEASE_VERSION" --notes-file $notes $latest
+          }

@@ -23,10 +23,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.10"
 
@@ -35,5 +35,32 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Run tests
-        run: python -m unittest discover -s tests
+      - name: Run inventory tests
+        run: python -m unittest discover -s tests -p "test_service.py" -v
+
+      - name: Run database tests
+        run: python -m unittest discover -s tests -p "test_database.py" -v
+
+      - name: Test About page content
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python -m unittest discover -s tests -p "test_about.py"
+          -k test_about_tab_displays_version_and_developer -v
+
+      - name: Test About page links
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python -m unittest discover -s tests -p "test_about.py"
+          -k test_about_links_use_expected_github_urls -v
+
+      - name: Test package version metadata
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python -m unittest discover -s tests -p "test_about.py"
+          -k test_package_metadata_uses_the_runtime_version -v
+
+      - name: Run release tooling tests
+        run: python -m unittest discover -s tests -p "test_release_tools.py" -v

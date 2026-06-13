@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -28,11 +30,55 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .domain import ItemControlError
+from .about import about_details
 from .database import encrypt_plaintext_database
+from .domain import ItemControlError
 from .repository import SQLiteRepository
 from .service import InventoryService
 from .settings import add_recent_database, load_recent_databases
+
+
+class AboutPage(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        details = about_details()
+
+        title = QLabel(details["name"])
+        title.setStyleSheet("font-size: 24px; font-weight: 600;")
+        self.version_label = QLabel(f"Versao {details['version']}")
+        self.developer_label = QLabel(f"Desenvolvido por {details['developer']}")
+
+        self.github_link = self._link_label(
+            "Perfil no GitHub", details["developer_url"]
+        )
+        self.repository_link = self._link_label(
+            "Repositorio do projeto", details["repository_url"]
+        )
+        self.releases_link = self._link_label(
+            "Versoes e downloads", details["releases_url"]
+        )
+
+        links = QFormLayout()
+        links.addRow("Desenvolvedor", self.github_link)
+        links.addRow("Codigo-fonte", self.repository_link)
+        links.addRow("Downloads", self.releases_link)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addWidget(self.version_label)
+        layout.addWidget(self.developer_label)
+        layout.addSpacing(16)
+        layout.addLayout(links)
+        layout.addStretch()
+
+    @staticmethod
+    def _link_label(text: str, url: str) -> QLabel:
+        label = QLabel(f'<a href="{url}">{text}</a>')
+        label.setToolTip(url)
+        label.linkActivated.connect(
+            lambda selected_url: QDesktopServices.openUrl(QUrl(selected_url))
+        )
+        return label
 
 
 class PasswordConfirmationDialog(QDialog):
@@ -326,6 +372,9 @@ class MainWindow(QMainWindow):
         queries_layout.addWidget(distribution_box)
         queries_layout.addWidget(self.stock_distribution_list)
         self.tabs.addTab(queries, "Consultas")
+
+        self.about_page = AboutPage()
+        self.tabs.addTab(self.about_page, "Sobre")
 
         root = QWidget()
         root_layout = QVBoxLayout(root)

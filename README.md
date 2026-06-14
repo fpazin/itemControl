@@ -2,95 +2,93 @@
 
 Aplicativo desktop em Python para controle de ativos de TI entre países e localidades.
 
-Desktop application in Python for controlling IT assets across countries and locations.
+## Versão atual
 
-## Como executar / How to run
+**ItemControl 0.2.0**
+
+Principais recursos desta versão:
+
+- múltiplas bases de dados;
+- bases protegidas por senha com criptografia SQLCipher;
+- lista de bases abertas recentemente, sem armazenar senhas;
+- página `Sobre` com versão, desenvolvedor, repositório e downloads;
+- executável portátil para Windows x64.
+
+Consulte todas as alterações no [CHANGELOG.md](CHANGELOG.md).
+
+## Download
+
+Os executáveis portáteis e as notas de cada versão estão disponíveis na página:
+
+- [GitHub Releases](https://github.com/fpazin/itemControl/releases)
+
+O executável Windows não precisa de instalação. Baixe o arquivo
+`ItemControl-vX.Y.Z-windows-x64.exe` da versão desejada e execute-o diretamente.
+Versões anteriores permanecem disponíveis na mesma página.
+
+## Como executar pelo código-fonte
+
+Requisitos:
+
+- Python 3.10 ou superior;
+- Windows, Linux ou macOS com suporte ao PySide6.
 
 ```bash
+python -m pip install -e .
 python -m itemcontrol
 ```
 
-## Testes / Tests
+Para consultar a versão instalada:
+
+```bash
+python -m itemcontrol --version
+```
+
+## Bases de dados
+
+Ao iniciar, o aplicativo permite escolher uma base existente ou criar uma nova.
+Bases novas podem ser comuns ou protegidas por senha com SQLCipher.
+
+- Senhas nunca são salvas pelo aplicativo.
+- Apenas os caminhos das bases recentes são armazenados localmente.
+- Bases SQLite antigas sem senha continuam compatíveis.
+- O menu `Base de dados > Proteger base...` cria uma cópia criptografada.
+- A base original não é sobrescrita durante a proteção.
+- Não existe recuperação de senha para bases criptografadas.
+
+## Sobre
+
+A aba `Sobre` apresenta:
+
+- versão atual do ItemControl;
+- desenvolvedor: [Felipe Pazin](https://github.com/fpazin);
+- [repositório do projeto](https://github.com/fpazin/itemControl);
+- acesso às versões e downloads.
+
+## Testes
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-## Versoes e downloads / Releases and downloads
+## Controle de versão
 
-Os executaveis Windows x64 portateis e as principais mudancas de cada versao
-estao disponiveis em:
+O projeto usa versionamento semântico (`MAJOR.MINOR.PATCH`).
 
-- https://github.com/fpazin/itemControl/releases
-- [CHANGELOG.md](CHANGELOG.md)
+- `develop`: branch de desenvolvimento e integração.
+- `main`: versões estáveis publicadas.
+- tags `vX.Y.Z`: identificam cada versão disponibilizada.
 
-O executavel nao precisa de instalacao. Baixe o arquivo da versao desejada e
-execute-o diretamente.
+A fonte única da versão é `src/itemcontrol/__init__.py`. O `pyproject.toml`
+lê esse valor dinamicamente.
 
-## Bases protegidas / Protected databases
+O workflow de release executa os testes, gera o executável Windows portátil e
+publica as notas extraídas do `CHANGELOG.md` no GitHub Releases.
 
-Ao iniciar, o app permite escolher uma base existente, criar uma nova base ou abrir
-uma base protegida por senha. Bases novas podem ser criadas sem senha ou com
-criptografia SQLCipher.
-
-- Senhas nao sao salvas pelo app.
-- Apenas caminhos de bases recentes sao gravados nas configuracoes locais.
-- Bases SQLite antigas sem senha continuam abrindo normalmente.
-- Use o menu `Base de dados > Proteger base...` para criar uma copia criptografada
-  da base atual.
-- Se a senha de uma base criptografada for perdida, a base nao podera ser aberta.
-
-## Controle de versão / Version control
-
-Este projeto usa Git Flow com versionamento SemVer.
-
-- `main`: contém apenas versões estáveis tagueadas.
-- `develop`: integra o trabalho em andamento antes de uma release.
-- `feature/<nome>`: novas funcionalidades criadas a partir de `develop`.
-- `release/x.y.z`: preparação de uma versão, incluindo ajuste de versão e validação final.
-- `hotfix/x.y.z`: correção urgente criada a partir de `main` e depois integrada em `develop`.
-
-As versões seguem SemVer (`MAJOR.MINOR.PATCH`). A fonte unica da versao e
-`src/itemcontrol/__init__.py`; o `pyproject.toml` le esse valor dinamicamente.
-
-### Comandos principais
-
-```bash
-git switch develop
-git switch -c feature/minha-mudanca
-python -m unittest discover -s tests
-git switch develop
-git merge --no-ff feature/minha-mudanca
-```
-
-### Criar release
-
-```bash
-git switch develop
-git switch -c release/0.2.0
-python -m unittest discover -s tests
-git switch main
-git merge --no-ff release/0.2.0
-git tag -a v0.2.0 -m "Release v0.2.0"
-git switch develop
-git merge --no-ff release/0.2.0
-```
-
-### Criar hotfix
-
-```bash
-git switch main
-git switch -c hotfix/0.1.1
-python -m unittest discover -s tests
-git switch main
-git merge --no-ff hotfix/0.1.1
-git tag -a v0.1.1 -m "Release v0.1.1"
-git switch develop
-git merge --no-ff hotfix/0.1.1
-```
-
-## Tecnologias / Technologies
+## Tecnologias
 
 - Python 3.10+
 - PySide6
 - SQLite
+- SQLCipher
+- PyInstaller

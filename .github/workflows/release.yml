@@ -75,8 +75,13 @@ jobs:
       - name: Validate portable executable
         shell: pwsh
         run: |
-          & ".\dist\$env:ARTIFACT" --version
-          if ($LASTEXITCODE -ne 0) {
+          $process = Start-Process `
+            -FilePath ".\dist\$env:ARTIFACT" `
+            -ArgumentList "--version" `
+            -WindowStyle Hidden `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
             throw "Portable executable version check failed."
           }
 

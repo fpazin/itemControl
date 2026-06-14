@@ -24,10 +24,10 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertIn("Pagina Sobre", notes)
         self.assertIn("Executavel Windows x64 portatil", notes)
 
-    def test_extracts_version_030_notes(self) -> None:
-        notes = extract_release_notes(self.changelog, "0.3.0")
-        self.assertIn("Dashboard de estoque", notes)
-        self.assertIn("Graficos de estoque", notes)
+    def test_extracts_version_040_notes(self) -> None:
+        notes = extract_release_notes(self.changelog, "0.4.0")
+        self.assertIn("Aba Devices", notes)
+        self.assertIn("Análise de versão", notes)
         self.assertIn("Nenhuma remocao", notes)
 
     def test_rejects_unknown_version(self) -> None:

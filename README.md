@@ -4,7 +4,7 @@ Aplicativo desktop em Python para controle de ativos de TI entre países e local
 
 ## Versão atual
 
-**ItemControl 0.3.0**
+**ItemControl 0.4.0**
 
 Principais recursos desta versão:
 
@@ -13,6 +13,7 @@ Principais recursos desta versão:
 - lista de bases abertas recentemente, sem armazenar senhas;
 - Dashboard com visão geral e filtros de estoque;
 - gráficos de distribuição por país e pelos locais com maior estoque;
+- aba Devices com tipos cadastráveis e uso dos locais já existentes;
 - página `Sobre` com versão, desenvolvedor, repositório e downloads;
 - executável portátil para Windows x64.
 

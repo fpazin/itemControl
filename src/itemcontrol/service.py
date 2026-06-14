@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .domain import NotFoundError, ValidationError
-from .repository import SQLiteRepository
+from .repository import DEVICE_STATUSES, SQLiteRepository
 
 
 class InventoryService:
@@ -19,6 +19,15 @@ class InventoryService:
     def _require_positive_quantity(quantity: int) -> None:
         if quantity <= 0:
             raise ValidationError("Quantity must be greater than 0.")
+
+    @staticmethod
+    def _require_device_status(status: str | None) -> str:
+        clean_status = InventoryService._clean(status)
+        if not clean_status:
+            raise ValidationError("Device status is required.")
+        if clean_status not in DEVICE_STATUSES:
+            raise ValidationError("Invalid device status.")
+        return clean_status
 
     def create_country(self, name: str) -> int:
         clean_name = self._clean(name)
@@ -49,6 +58,66 @@ class InventoryService:
             return self.repository.create_item(clean_serial, clean_name)
         except Exception as exc:
             raise ValidationError(f"Could not create item: {exc}") from exc
+
+    def create_device_user(self, name: str) -> int:
+        clean_name = self._clean(name)
+        if not clean_name:
+            raise ValidationError("User name is required.")
+        try:
+            return self.repository.create_device_user(clean_name)
+        except Exception as exc:
+            raise ValidationError(f"Could not create user: {exc}") from exc
+
+    def create_device_type(self, name: str) -> int:
+        clean_name = self._clean(name)
+        if not clean_name:
+            raise ValidationError("Device type name is required.")
+        try:
+            return self.repository.create_device_type(clean_name)
+        except Exception as exc:
+            raise ValidationError(f"Could not create device type: {exc}") from exc
+
+    def create_device(
+        self,
+        serial: str,
+        name: str,
+        device_type_id: int,
+        status: str,
+        location_id: int,
+        user_id: int | None = None,
+        note: str = "",
+    ) -> int:
+        clean_serial = self._clean(serial)
+        clean_name = self._clean(name)
+        clean_status = self._require_device_status(status)
+        clean_note = self._clean(note)
+        if not clean_serial:
+            raise ValidationError("Device serial is required.")
+        if not clean_name:
+            raise ValidationError("Device name is required.")
+        if self.repository.get_location(location_id) is None:
+            raise NotFoundError("Location not found.")
+        if self.repository.get_device_type(device_type_id) is None:
+            raise NotFoundError("Device type not found.")
+        if clean_status == "Disponível":
+            user_id = None
+        else:
+            if user_id is None:
+                raise ValidationError("User is required for devices not marked as available.")
+            if self.repository.get_device_user(user_id) is None:
+                raise NotFoundError("User not found.")
+        try:
+            return self.repository.create_device(
+                clean_serial,
+                clean_name,
+                device_type_id,
+                clean_status,
+                location_id,
+                user_id,
+                clean_note,
+            )
+        except Exception as exc:
+            raise ValidationError(f"Could not create device: {exc}") from exc
 
     def add_item_to_location(
         self,
@@ -146,6 +215,50 @@ class InventoryService:
                 note or None,
             )
 
+    def transfer_device(
+        self,
+        device_id: int,
+        location_id: int,
+        user_id: int | None = None,
+        status: str | None = None,
+        note: str = "",
+    ) -> None:
+        device = self.repository.get_device(device_id)
+        if device is None:
+            raise NotFoundError("Device not found.")
+        if self.repository.get_location(location_id) is None:
+            raise NotFoundError("Location not found.")
+
+        clean_status = self._require_device_status(status or device["status"])
+        clean_note = self._clean(note)
+        if clean_status == "Disponível":
+            user_id = None
+        else:
+            if user_id is None:
+                raise ValidationError("User is required for devices not marked as available.")
+            if self.repository.get_device_user(user_id) is None:
+                raise NotFoundError("User not found.")
+
+        with self.repository.transaction():
+            self.repository.update_device(
+                device_id,
+                int(device["device_type_id"]),
+                clean_status,
+                location_id,
+                user_id,
+                clean_note,
+            )
+            self.repository.add_device_transfer(
+                device_id,
+                device["user_id"],
+                user_id,
+                device["location_id"],
+                location_id,
+                device["status"],
+                clean_status,
+                clean_note,
+            )
+
     def countries(self):
         return self.repository.list_countries()
 
@@ -157,6 +270,27 @@ class InventoryService:
 
     def movements(self, item_id: int | None = None):
         return self.repository.list_movements(item_id=item_id)
+
+    def device_users(self):
+        return self.repository.list_device_users()
+
+    def device_types(self):
+        return self.repository.list_device_types()
+
+    def devices(self):
+        if not self.repository.has_device_schema():
+            return []
+        return self.repository.list_devices()
+
+    def device_transfers(self):
+        if not self.repository.has_device_schema():
+            return []
+        return self.repository.list_device_transfers()
+
+    def device_assignments(self, status: str | None = None):
+        if not self.repository.has_device_schema():
+            return []
+        return self.repository.list_device_assignments(status=status)
 
     def stock_for_item(self, item_id: int):
         if self.repository.get_item(item_id) is None:

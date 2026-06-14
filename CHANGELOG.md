@@ -2,6 +2,18 @@
 
 As principais mudancas de cada versao estavel do ItemControl sao registradas aqui.
 
+## [0.4.0] - 2026-06-14
+
+### Adicionado
+
+- Aba Devices com cadastro de tipos como Tablet, Desktop e Macbook.
+- Uso dos locais já cadastrados no módulo de estoque.
+- Análise de versão da estrutura de Devices ao abrir a base.
+
+### Removido
+
+- Nenhuma remocao.
+
 ## [0.3.0] - 2026-06-14
 
 ### Adicionado

@@ -271,6 +271,51 @@ class SQLiteRepository:
             (item_id,),
         ).fetchall()
 
+    def list_dashboard_stock(
+        self,
+        country_id: int | None = None,
+        location_id: int | None = None,
+        item_query: str | None = None,
+    ):
+        query = """
+            SELECT items.id AS item_id,
+                   items.serial,
+                   items.name AS item_name,
+                   countries.id AS country_id,
+                   countries.name AS country_name,
+                   locations.id AS location_id,
+                   locations.name AS location_name,
+                   item_stock.quantity
+            FROM item_stock
+            JOIN items ON items.id = item_stock.item_id
+            JOIN locations ON locations.id = item_stock.location_id
+            JOIN countries ON countries.id = locations.country_id
+            WHERE item_stock.quantity > 0
+        """
+        conditions = []
+        params: list[int | str] = []
+        if country_id is not None:
+            conditions.append("countries.id = ?")
+            params.append(country_id)
+        if location_id is not None:
+            conditions.append("locations.id = ?")
+            params.append(location_id)
+        if item_query:
+            conditions.append(
+                "(LOWER(items.name) LIKE ? OR LOWER(COALESCE(items.serial, '')) LIKE ?)"
+            )
+            search = f"%{item_query.lower()}%"
+            params.extend((search, search))
+        if conditions:
+            query += " AND " + " AND ".join(conditions)
+        query += """
+            ORDER BY countries.name,
+                     locations.name,
+                     items.name,
+                     items.serial
+        """
+        return self.connection.execute(query, tuple(params)).fetchall()
+
     def count_items_at_location(self, location_id: int) -> int:
         row = self.connection.execute(
             "SELECT COALESCE(SUM(quantity), 0) AS total FROM item_stock WHERE location_id = ?",

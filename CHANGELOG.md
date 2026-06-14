@@ -2,6 +2,20 @@
 
 As principais mudancas de cada versao estavel do ItemControl sao registradas aqui.
 
+## [0.3.0] - 2026-06-14
+
+### Adicionado
+
+- Dashboard de estoque como primeira aba do aplicativo.
+- Indicadores de unidades, equipamentos, paises e locais.
+- Filtros combinaveis por pais, local, nome e serial do equipamento.
+- Graficos de estoque por pais e dos dez locais com maior estoque.
+- Tabela detalhada e ordenavel com somente saldos positivos.
+
+### Removido
+
+- Nenhuma remocao.
+
 ## [0.2.0] - 2026-06-13
 
 ### Adicionado

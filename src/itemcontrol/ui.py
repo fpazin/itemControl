@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from .about import about_details
+from .dashboard import DashboardPage
 from .database import encrypt_plaintext_database
 from .domain import ItemControlError
 from .repository import SQLiteRepository
@@ -288,6 +289,8 @@ class MainWindow(QMainWindow):
         self.item_distribution_button = QPushButton("Ver distribuicao")
         self.item_distribution_button.clicked.connect(self.refresh_item_distribution)
 
+        self.dashboard_page = DashboardPage(self.service)
+
         self._build_tabs()
         self._build_menu()
         self.refresh_all()
@@ -298,6 +301,8 @@ class MainWindow(QMainWindow):
         protect_action.triggered.connect(self.protect_database)
 
     def _build_tabs(self) -> None:
+        self.tabs.addTab(self.dashboard_page, "Dashboard")
+
         registration = QWidget()
         registration_layout = QGridLayout(registration)
 
@@ -431,6 +436,7 @@ class MainWindow(QMainWindow):
             self.service.repository.close()
             repository = SQLiteRepository(target, password)
             self.service = InventoryService(repository)
+            self.dashboard_page.set_service(self.service)
         except ItemControlError as exc:
             self.show_error(str(exc))
             return
@@ -513,6 +519,8 @@ class MainWindow(QMainWindow):
             lambda r: f"{r['serial'] or '(sem serial)'} - {r['name']}",
         )
 
+        self.dashboard_page.load_options(countries, locations)
+        self.dashboard_page.refresh()
         self.refresh_balance()
         self.refresh_item_distribution()
         self.refresh_stock_table()

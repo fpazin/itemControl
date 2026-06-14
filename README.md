@@ -4,13 +4,15 @@ Aplicativo desktop em Python para controle de ativos de TI entre países e local
 
 ## Versão atual
 
-**ItemControl 0.2.0**
+**ItemControl 0.3.0**
 
 Principais recursos desta versão:
 
 - múltiplas bases de dados;
 - bases protegidas por senha com criptografia SQLCipher;
 - lista de bases abertas recentemente, sem armazenar senhas;
+- Dashboard com visão geral e filtros de estoque;
+- gráficos de distribuição por país e pelos locais com maior estoque;
 - página `Sobre` com versão, desenvolvedor, repositório e downloads;
 - executável portátil para Windows x64.
 
@@ -56,6 +58,19 @@ Bases novas podem ser comuns ou protegidas por senha com SQLCipher.
 - A base original não é sobrescrita durante a proteção.
 - Não existe recuperação de senha para bases criptografadas.
 
+## Dashboard
+
+A primeira aba apresenta uma visão consolidada do estoque com:
+
+- totais de unidades, equipamentos, países e locais;
+- filtros combináveis por país, local, nome e serial;
+- gráfico de distribuição por país;
+- ranking dos dez locais com maior estoque;
+- tabela detalhada e ordenável dos saldos positivos.
+
+Os dados são atualizados depois de cadastros e movimentações. O botão `Atualizar`
+permite refazer a consulta manualmente, e `Limpar filtros` restaura a visão geral.
+
 ## Sobre
 
 A aba `Sobre` apresenta:
@@ -89,6 +104,7 @@ publica as notas extraídas do `CHANGELOG.md` no GitHub Releases.
 
 - Python 3.10+
 - PySide6
+- QtCharts
 - SQLite
 - SQLCipher
 - PyInstaller

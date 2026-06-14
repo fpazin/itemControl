@@ -77,6 +77,60 @@ class InventoryServiceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.service.create_item("SER-005", "Keyboard Clone")
 
+    def test_dashboard_aggregates_and_filters_positive_stock(self) -> None:
+        brazil_id = self.service.create_country("Brazil")
+        us_id = self.service.create_country("United States")
+        sp_id = self.service.create_location(brazil_id, "Sao Paulo")
+        rio_id = self.service.create_location(brazil_id, "Rio de Janeiro")
+        ny_id = self.service.create_location(us_id, "New York")
+        notebook_id = self.service.create_item("NOTE-001", "Notebook")
+        monitor_id = self.service.create_item("MON-001", "Monitor")
+        self.service.create_item("ZERO-001", "Item sem estoque")
+
+        self.service.add_item_to_location(notebook_id, sp_id, quantity=5)
+        self.service.add_item_to_location(notebook_id, rio_id, quantity=3)
+        self.service.add_item_to_location(monitor_id, ny_id, quantity=2)
+
+        result = self.service.dashboard()
+        self.assertEqual(result["total_units"], 10)
+        self.assertEqual(result["distinct_items"], 2)
+        self.assertEqual(result["countries"], 2)
+        self.assertEqual(result["locations"], 3)
+        self.assertEqual(len(result["details"]), 3)
+        self.assertEqual(
+            [(row["name"], row["quantity"]) for row in result["by_country"]],
+            [("Brazil", 8), ("United States", 2)],
+        )
+
+        brazil = self.service.dashboard(country_id=brazil_id)
+        self.assertEqual(brazil["total_units"], 8)
+        self.assertEqual(brazil["locations"], 2)
+
+        sao_paulo = self.service.dashboard(location_id=sp_id)
+        self.assertEqual(sao_paulo["total_units"], 5)
+        self.assertEqual(len(sao_paulo["details"]), 1)
+
+        by_name = self.service.dashboard(item_query="NOTE")
+        self.assertEqual(by_name["total_units"], 8)
+        by_serial = self.service.dashboard(item_query="mon-001")
+        self.assertEqual(by_serial["total_units"], 2)
+
+    def test_dashboard_returns_only_ten_highest_stock_locations(self) -> None:
+        country_id = self.service.create_country("Brazil")
+        item_id = self.service.create_item("RANK-001", "Ranking")
+        for index in range(11):
+            location_id = self.service.create_location(
+                country_id, f"Location {index + 1:02d}"
+            )
+            self.service.add_item_to_location(
+                item_id, location_id, quantity=index + 1
+            )
+
+        result = self.service.dashboard()
+        self.assertEqual(len(result["by_location"]), 10)
+        self.assertEqual(result["by_location"][0]["quantity"], 11)
+        self.assertEqual(result["by_location"][-1]["quantity"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

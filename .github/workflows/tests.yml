@@ -41,6 +41,11 @@ jobs:
       - name: Run database tests
         run: python -m unittest discover -s tests -p "test_database.py" -v
 
+      - name: Run Dashboard tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -p "test_dashboard.py" -v
+
       - name: Test About page content
         env:
           QT_QPA_PLATFORM: offscreen

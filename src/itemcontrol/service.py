@@ -170,3 +170,76 @@ class InventoryService:
 
     def total_in_inventory(self) -> int:
         return self.repository.count_items_with_location()
+
+    def dashboard(
+        self,
+        country_id: int | None = None,
+        location_id: int | None = None,
+        item_query: str | None = None,
+    ) -> dict:
+        clean_query = self._clean(item_query)
+        rows = self.repository.list_dashboard_stock(
+            country_id=country_id,
+            location_id=location_id,
+            item_query=clean_query,
+        )
+
+        country_totals: dict[tuple[int, str], int] = {}
+        location_totals: dict[tuple[int, str, str], int] = {}
+        item_ids: set[int] = set()
+        country_ids: set[int] = set()
+        location_ids: set[int] = set()
+        total_units = 0
+
+        for row in rows:
+            quantity = int(row["quantity"])
+            total_units += quantity
+            item_ids.add(int(row["item_id"]))
+            country_ids.add(int(row["country_id"]))
+            location_ids.add(int(row["location_id"]))
+
+            country_key = (int(row["country_id"]), row["country_name"])
+            country_totals[country_key] = country_totals.get(country_key, 0) + quantity
+
+            location_key = (
+                int(row["location_id"]),
+                row["country_name"],
+                row["location_name"],
+            )
+            location_totals[location_key] = (
+                location_totals.get(location_key, 0) + quantity
+            )
+
+        by_country = [
+            {"id": key[0], "name": key[1], "quantity": quantity}
+            for key, quantity in country_totals.items()
+        ]
+        by_country.sort(key=lambda row: (-row["quantity"], row["name"].lower()))
+
+        by_location = [
+            {
+                "id": key[0],
+                "country_name": key[1],
+                "name": key[2],
+                "label": f"{key[1]} / {key[2]}",
+                "quantity": quantity,
+            }
+            for key, quantity in location_totals.items()
+        ]
+        by_location.sort(
+            key=lambda row: (
+                -row["quantity"],
+                row["country_name"].lower(),
+                row["name"].lower(),
+            )
+        )
+
+        return {
+            "total_units": total_units,
+            "distinct_items": len(item_ids),
+            "countries": len(country_ids),
+            "locations": len(location_ids),
+            "by_country": by_country,
+            "by_location": by_location[:10],
+            "details": rows,
+        }

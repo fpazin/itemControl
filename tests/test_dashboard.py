@@ -79,6 +79,33 @@ class DashboardPageTests(unittest.TestCase):
         self.assertIn("7", page.total_units_label.text())
         self.assertEqual(page.stock_table.rowCount(), 2)
 
+    def test_dashboard_device_tab_uses_same_filters(self) -> None:
+        self.repository.ensure_device_schema()
+        device_type_id = next(
+            row["id"] for row in self.service.device_types() if row["name"] == "Desktop"
+        )
+        user_id = self.service.create_device_user("Alice")
+        device_id = self.service.create_device(
+            "DEV-001",
+            "Notebook corporativo",
+            device_type_id,
+            "Em uso",
+            self.sp_id,
+            user_id,
+        )
+        self.window.refresh_all()
+
+        page = self.window.dashboard_page
+        self.assertEqual(page.dashboard_tabs.tabText(1), "Devices")
+        self.assertEqual(page.device_table.rowCount(), 1)
+        self.assertIn("DEV-001", page.device_table.item(0, 0).text())
+
+        page.country_combo.setCurrentIndex(page.country_combo.findData(self.brazil_id))
+        page.item_query_input.setText("Macbook")
+        page.refresh()
+        self.assertEqual(page.device_table.rowCount(), 0)
+        self.assertFalse(page.device_empty_label.isHidden())
+
 
 if __name__ == "__main__":
     unittest.main()

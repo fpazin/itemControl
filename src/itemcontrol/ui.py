@@ -34,7 +34,7 @@ from .about import about_details
 from .dashboard import DashboardPage
 from .database import encrypt_plaintext_database
 from .domain import ItemControlError
-from .repository import SQLiteRepository
+from .repository import DEVICE_MODULE_VERSION, DEVICE_STATUSES, SQLiteRepository
 from .service import InventoryService
 from .settings import add_recent_database, load_recent_databases
 
@@ -80,6 +80,241 @@ class AboutPage(QWidget):
             lambda selected_url: QDesktopServices.openUrl(QUrl(selected_url))
         )
         return label
+
+
+class DeviceModulePage(QWidget):
+    def __init__(
+        self, service: InventoryService, parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self.service = service
+
+        self.users_list = QListWidget()
+        self.types_list = QListWidget()
+        self.devices_list = QListWidget()
+        self.transfers_list = QListWidget()
+
+        self.user_name_input = QLineEdit()
+        self.user_add_button = QPushButton("Cadastrar usuario")
+        self.user_add_button.clicked.connect(self.create_user)
+
+        self.type_name_input = QLineEdit()
+        self.type_add_button = QPushButton("Cadastrar tipo")
+        self.type_add_button.clicked.connect(self.create_type)
+
+        self.device_serial_input = QLineEdit()
+        self.device_name_input = QLineEdit()
+        self.device_type_combo = QComboBox()
+        self.device_status_combo = QComboBox()
+        self.device_status_combo.addItems(DEVICE_STATUSES)
+        self.device_user_combo = QComboBox()
+        self.device_location_combo = QComboBox()
+        self.device_add_button = QPushButton("Cadastrar dispositivo")
+        self.device_add_button.clicked.connect(self.create_device)
+
+        self.transfer_device_combo = QComboBox()
+        self.transfer_status_combo = QComboBox()
+        self.transfer_status_combo.addItem("Manter atual", None)
+        for status in DEVICE_STATUSES:
+            self.transfer_status_combo.addItem(status, status)
+        self.transfer_user_combo = QComboBox()
+        self.transfer_location_combo = QComboBox()
+        self.transfer_note_input = QLineEdit()
+        self.transfer_button = QPushButton("Transferir dispositivo")
+        self.transfer_button.clicked.connect(self.transfer_device)
+
+        layout = QGridLayout(self)
+
+        users_box = QGroupBox("Usuarios")
+        users_layout = QVBoxLayout(users_box)
+        users_form = QFormLayout()
+        users_form.addRow("Nome", self.user_name_input)
+        users_layout.addLayout(users_form)
+        users_layout.addWidget(self.user_add_button)
+        users_layout.addWidget(self.users_list)
+
+        types_box = QGroupBox("Tipos")
+        types_layout = QVBoxLayout(types_box)
+        types_form = QFormLayout()
+        types_form.addRow("Nome", self.type_name_input)
+        types_layout.addLayout(types_form)
+        types_layout.addWidget(self.type_add_button)
+        types_layout.addWidget(self.types_list)
+
+        devices_box = QGroupBox("Dispositivos")
+        devices_layout = QVBoxLayout(devices_box)
+        devices_form = QFormLayout()
+        devices_form.addRow("Serial", self.device_serial_input)
+        devices_form.addRow("Nome", self.device_name_input)
+        devices_form.addRow("Tipo", self.device_type_combo)
+        devices_form.addRow("Status", self.device_status_combo)
+        devices_form.addRow("Usuario", self.device_user_combo)
+        devices_form.addRow("Local", self.device_location_combo)
+        devices_layout.addLayout(devices_form)
+        devices_layout.addWidget(self.device_add_button)
+        devices_layout.addWidget(self.devices_list)
+
+        transfer_box = QGroupBox("Transferencia")
+        transfer_layout = QVBoxLayout(transfer_box)
+        transfer_form = QFormLayout()
+        transfer_form.addRow("Dispositivo", self.transfer_device_combo)
+        transfer_form.addRow("Novo status", self.transfer_status_combo)
+        transfer_form.addRow("Novo usuario", self.transfer_user_combo)
+        transfer_form.addRow("Novo local", self.transfer_location_combo)
+        transfer_form.addRow("Observacao", self.transfer_note_input)
+        transfer_layout.addLayout(transfer_form)
+        transfer_layout.addWidget(self.transfer_button)
+        transfer_layout.addWidget(self.transfers_list)
+
+        layout.addWidget(users_box, 0, 0)
+        layout.addWidget(types_box, 0, 1)
+        layout.addWidget(devices_box, 1, 0, 1, 2)
+        layout.addWidget(transfer_box, 2, 0, 1, 2)
+
+        self.refresh()
+
+    def set_service(self, service: InventoryService) -> None:
+        self.service = service
+
+    @staticmethod
+    def _selected_id(combo: QComboBox) -> int | None:
+        data = combo.currentData()
+        return None if data is None else int(data)
+
+    def _notify(self, message: str, error: bool = False) -> None:
+        window = self.window()
+        handler_name = "show_error" if error else "show_info"
+        handler = getattr(window, handler_name, None)
+        if callable(handler):
+            handler(message)
+
+    def _load_combo(self, combo: QComboBox, rows, label_builder, allow_blank: bool = False) -> None:
+        current = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        if allow_blank:
+            combo.addItem("Sem usuario", None)
+        for row in rows:
+            combo.addItem(label_builder(row), row["id"])
+        if current is not None:
+            index = combo.findData(current)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+
+    def refresh(self) -> None:
+        users = self.service.device_users()
+        types = self.service.device_types()
+        devices = self.service.devices()
+        transfers = self.service.device_transfers()
+        locations = self.service.locations()
+
+        self.users_list.clear()
+        for row in users:
+            self.users_list.addItem(f"#{row['id']} {row['name']}")
+
+        self.types_list.clear()
+        for row in types:
+            self.types_list.addItem(f"#{row['id']} {row['name']}")
+
+        self.devices_list.clear()
+        for row in devices:
+            user_name = row["user_name"] or "-"
+            type_name = row["device_type_name"]
+            self.devices_list.addItem(
+                f"#{row['id']} {row['serial']} - {row['name']} | {type_name} | {row['status']} | {user_name} | {row['country_name']} / {row['location_name']}"
+            )
+
+        self.transfers_list.clear()
+        for row in transfers:
+            to_user = row["to_user_name"] or "-"
+            from_user = row["from_user_name"] or "-"
+            self.transfers_list.addItem(
+                f"#{row['id']} {row['device_serial']} - {row['device_name']} | {row['device_type_name']} | {from_user} -> {to_user} | {row['from_location_name']} -> {row['to_location_name']} | {row['from_status']} -> {row['to_status']}"
+            )
+
+        self._load_combo(self.device_user_combo, users, lambda r: r["name"], True)
+        self._load_combo(self.device_type_combo, types, lambda r: r["name"])
+        self._load_combo(
+            self.device_location_combo,
+            locations,
+            lambda r: f"{r['country_name']} - {r['name']}",
+        )
+        self._load_combo(
+            self.transfer_device_combo,
+            devices,
+            lambda r: f"{r['serial']} - {r['name']} ({r['device_type_name']})",
+        )
+        self._load_combo(self.transfer_user_combo, users, lambda r: r["name"], True)
+        self._load_combo(
+            self.transfer_location_combo,
+            locations,
+            lambda r: f"{r['country_name']} - {r['name']}",
+        )
+
+    def create_user(self) -> None:
+        try:
+            self.service.create_device_user(self.user_name_input.text())
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self.user_name_input.clear()
+        self.refresh()
+        self._notify("Usuario cadastrado com sucesso.")
+
+    def create_type(self) -> None:
+        try:
+            self.service.create_device_type(self.type_name_input.text())
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self.type_name_input.clear()
+        self.refresh()
+        self._notify("Tipo cadastrado com sucesso.")
+
+    def create_device(self) -> None:
+        device_type_id = self._selected_id(self.device_type_combo)
+        location_id = self._selected_id(self.device_location_combo)
+        if device_type_id is None or location_id is None:
+            self._notify("Selecione tipo e local do dispositivo.", error=True)
+            return
+        try:
+            self.service.create_device(
+                self.device_serial_input.text(),
+                self.device_name_input.text(),
+                device_type_id,
+                self.device_status_combo.currentText(),
+                location_id,
+                self._selected_id(self.device_user_combo),
+            )
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self.device_serial_input.clear()
+        self.device_name_input.clear()
+        self.refresh()
+        self._notify("Dispositivo cadastrado com sucesso.")
+
+    def transfer_device(self) -> None:
+        device_id = self._selected_id(self.transfer_device_combo)
+        location_id = self._selected_id(self.transfer_location_combo)
+        if device_id is None or location_id is None:
+            self._notify("Selecione dispositivo e local.", error=True)
+            return
+        try:
+            self.service.transfer_device(
+                device_id,
+                location_id,
+                self._selected_id(self.transfer_user_combo),
+                self.transfer_status_combo.currentData(),
+                self.transfer_note_input.text(),
+            )
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self.transfer_note_input.clear()
+        self.refresh()
+        self._notify("Dispositivo transferido com sucesso.")
 
 
 class PasswordConfirmationDialog(QDialog):
@@ -230,11 +465,15 @@ class MainWindow(QMainWindow):
         service: InventoryService,
         database_path: str,
         database_password: str | None = None,
+        device_module_enabled: bool | None = None,
     ) -> None:
         super().__init__()
         self.service = service
         self.database_path = database_path
         self.database_password = database_password
+        if device_module_enabled is None:
+            device_module_enabled = self.service.repository.has_device_schema()
+        self.device_module_enabled = device_module_enabled
         self.setWindowTitle(f"ItemControl - {database_path}")
         self.resize(1150, 780)
 
@@ -290,6 +529,7 @@ class MainWindow(QMainWindow):
         self.item_distribution_button.clicked.connect(self.refresh_item_distribution)
 
         self.dashboard_page = DashboardPage(self.service)
+        self.device_page = DeviceModulePage(self.service) if device_module_enabled else None
 
         self._build_tabs()
         self._build_menu()
@@ -378,6 +618,9 @@ class MainWindow(QMainWindow):
         queries_layout.addWidget(self.stock_distribution_list)
         self.tabs.addTab(queries, "Consultas")
 
+        if self.device_page is not None:
+            self.tabs.addTab(self.device_page, "Devices")
+
         self.about_page = AboutPage()
         self.tabs.addTab(self.about_page, "Sobre")
 
@@ -437,6 +680,8 @@ class MainWindow(QMainWindow):
             repository = SQLiteRepository(target, password)
             self.service = InventoryService(repository)
             self.dashboard_page.set_service(self.service)
+            if self.device_page is not None:
+                self.device_page.set_service(self.service)
         except ItemControlError as exc:
             self.show_error(str(exc))
             return
@@ -521,6 +766,8 @@ class MainWindow(QMainWindow):
 
         self.dashboard_page.load_options(countries, locations)
         self.dashboard_page.refresh()
+        if self.device_page is not None:
+            self.device_page.refresh()
         self.refresh_balance()
         self.refresh_item_distribution()
         self.refresh_stock_table()
@@ -710,8 +957,34 @@ def build_application(
         database_path = dialog.database_path
         database_password = dialog.database_password
     repository = SQLiteRepository(database_path, database_password)
+    device_module_enabled = True
+    if repository.device_schema_needs_upgrade():
+        missing_tables = repository.device_schema_missing_tables()
+        current_version = repository.device_schema_version()
+        version_text = "nenhuma" if current_version is None else str(current_version)
+        answer = QMessageBox.question(
+            None,
+            "ItemControl",
+            "A base selecionada nao possui a estrutura de Devices.\n\n"
+            "Versao atual da estrutura: "
+            + version_text
+            + "\nVersao esperada: "
+            + str(DEVICE_MODULE_VERSION)
+            + "\nTabelas faltando: "
+            + (", ".join(missing_tables) if missing_tables else "nenhuma")
+            + "\n\nDeseja criar/atualizar agora?",
+        )
+        if answer == QMessageBox.Yes:
+            repository.ensure_device_schema()
+        else:
+            device_module_enabled = False
     service = InventoryService(repository)
-    window = MainWindow(service, database_path, database_password)
+    window = MainWindow(
+        service,
+        database_path,
+        database_password,
+        device_module_enabled=device_module_enabled,
+    )
     return app, window
 
 

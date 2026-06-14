@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -70,9 +71,29 @@ class DashboardPage(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
 
+        self.device_table = QTableWidget(0, 7)
+        self.device_table.setHorizontalHeaderLabels(
+            ["Serial", "Device", "Tipo", "Status", "Usuario", "Pais", "Local"]
+        )
+        self.device_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.device_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.device_table.setSortingEnabled(True)
+        device_header = self.device_table.horizontalHeader()
+        device_header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        device_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        device_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+
         self.empty_label = QLabel("Nenhum estoque encontrado para os filtros aplicados.")
         self.empty_label.setAlignment(Qt.AlignCenter)
         self.empty_label.setStyleSheet("color: #666; padding: 16px;")
+
+        self.device_empty_label = QLabel(
+            "Nenhum device encontrado para os filtros aplicados."
+        )
+        self.device_empty_label.setAlignment(Qt.AlignCenter)
+        self.device_empty_label.setStyleSheet("color: #666; padding: 16px;")
+
+        self.dashboard_tabs = QTabWidget()
 
         self._build_layout()
         self.country_combo.currentIndexChanged.connect(self._country_changed)
@@ -109,12 +130,24 @@ class DashboardPage(QWidget):
         charts.addWidget(self.country_chart, 1)
         charts.addWidget(self.location_chart, 1)
 
+        stock_page = QWidget()
+        stock_layout = QVBoxLayout(stock_page)
+        stock_layout.addWidget(self.empty_label)
+        stock_layout.addWidget(self.stock_table, 1)
+
+        devices_page = QWidget()
+        devices_layout = QVBoxLayout(devices_page)
+        devices_layout.addWidget(self.device_empty_label)
+        devices_layout.addWidget(self.device_table, 1)
+
+        self.dashboard_tabs.addTab(stock_page, "Estoque")
+        self.dashboard_tabs.addTab(devices_page, "Devices")
+
         layout = QVBoxLayout(self)
         layout.addLayout(filters)
         layout.addLayout(indicators)
         layout.addLayout(charts)
-        layout.addWidget(self.empty_label)
-        layout.addWidget(self.stock_table, 1)
+        layout.addWidget(self.dashboard_tabs, 1)
 
     def set_service(self, service: InventoryService) -> None:
         self.service = service
@@ -166,6 +199,11 @@ class DashboardPage(QWidget):
             location_id=self.location_combo.currentData(),
             item_query=self.item_query_input.text(),
         )
+        device_result = self.service.dashboard_devices(
+            country_id=self.country_combo.currentData(),
+            location_id=self.location_combo.currentData(),
+            device_query=self.item_query_input.text(),
+        )
         self._set_indicator(
             self.total_units_label, result["total_units"], "Unidades em estoque"
         )
@@ -186,6 +224,10 @@ class DashboardPage(QWidget):
         has_rows = bool(result["details"])
         self.empty_label.setVisible(not has_rows)
         self.stock_table.setVisible(has_rows)
+        self._fill_device_table(device_result["details"])
+        has_device_rows = bool(device_result["details"])
+        self.device_empty_label.setVisible(not has_device_rows)
+        self.device_table.setVisible(has_device_rows)
 
     @staticmethod
     def _set_indicator(label: QLabel, value: int, title: str) -> None:
@@ -236,3 +278,22 @@ class DashboardPage(QWidget):
             quantity_item.setData(Qt.UserRole, int(row["quantity"]))
             self.stock_table.setItem(row_index, 4, quantity_item)
         self.stock_table.setSortingEnabled(True)
+
+    def _fill_device_table(self, rows) -> None:
+        self.device_table.setSortingEnabled(False)
+        self.device_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            values = (
+                row["serial"] or "(sem serial)",
+                row["device_name"],
+                row["device_type_name"],
+                row["status"],
+                row["user_name"] or "-",
+                row["country_name"],
+                row["location_name"],
+            )
+            for column, value in enumerate(values):
+                self.device_table.setItem(
+                    row_index, column, QTableWidgetItem(str(value))
+                )
+        self.device_table.setSortingEnabled(True)

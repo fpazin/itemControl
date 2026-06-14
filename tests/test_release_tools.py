@@ -30,6 +30,11 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertIn("Análise de versão", notes)
         self.assertIn("Nenhuma remocao", notes)
 
+    def test_extracts_version_041_notes(self) -> None:
+        notes = extract_release_notes(self.changelog, "0.4.1")
+        self.assertIn("Aba interna de Devices", notes)
+        self.assertIn("Consulta consolidada de Devices", notes)
+
     def test_rejects_unknown_version(self) -> None:
         with self.assertRaises(ValueError):
             extract_release_notes(self.changelog, "9.9.9")

@@ -377,3 +377,50 @@ class InventoryService:
             "by_location": by_location[:10],
             "details": rows,
         }
+
+    def dashboard_devices(
+        self,
+        country_id: int | None = None,
+        location_id: int | None = None,
+        device_query: str | None = None,
+    ) -> dict:
+        if not self.repository.has_device_schema():
+            return {
+                "total_devices": 0,
+                "by_status": [],
+                "by_type": [],
+                "details": [],
+            }
+        clean_query = self._clean(device_query)
+        rows = self.repository.list_dashboard_devices(
+            country_id=country_id,
+            location_id=location_id,
+            device_query=clean_query,
+        )
+        total_devices = len(rows)
+        status_totals: dict[str, int] = {}
+        type_totals: dict[str, int] = {}
+        for row in rows:
+            status = row["status"]
+            device_type_name = row["device_type_name"]
+            status_totals[status] = status_totals.get(status, 0) + 1
+            type_totals[device_type_name] = type_totals.get(device_type_name, 0) + 1
+
+        by_status = [
+            {"name": name, "quantity": quantity}
+            for name, quantity in status_totals.items()
+        ]
+        by_status.sort(key=lambda row: (-row["quantity"], row["name"].lower()))
+
+        by_type = [
+            {"name": name, "quantity": quantity}
+            for name, quantity in type_totals.items()
+        ]
+        by_type.sort(key=lambda row: (-row["quantity"], row["name"].lower()))
+
+        return {
+            "total_devices": total_devices,
+            "by_status": by_status,
+            "by_type": by_type,
+            "details": rows,
+        }

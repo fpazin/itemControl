@@ -2,6 +2,17 @@
 
 As principais mudancas de cada versao estavel do ItemControl sao registradas aqui.
 
+## [0.4.1] - 2026-06-14
+
+### Adicionado
+
+- Aba interna de Devices no Dashboard com a mesma filtragem do estoque.
+- Consulta consolidada de Devices por país, local e busca por nome/serial/tipo.
+
+### Removido
+
+- Nenhuma remocao.
+
 ## [0.4.0] - 2026-06-14
 
 ### Adicionado

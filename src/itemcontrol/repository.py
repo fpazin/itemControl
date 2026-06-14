@@ -469,6 +469,60 @@ class SQLiteRepository:
             """
         ).fetchall()
 
+    def list_dashboard_devices(
+        self,
+        country_id: int | None = None,
+        location_id: int | None = None,
+        device_query: str | None = None,
+    ):
+        query = """
+            SELECT devices.id AS device_id,
+                   devices.serial,
+                   devices.name AS device_name,
+                   devices.status,
+                   device_types.name AS device_type_name,
+                   device_users.name AS user_name,
+                   countries.id AS country_id,
+                   countries.name AS country_name,
+                   locations.id AS location_id,
+                   locations.name AS location_name
+            FROM devices
+            JOIN device_types ON device_types.id = devices.device_type_id
+            LEFT JOIN device_users ON device_users.id = devices.user_id
+            JOIN locations ON locations.id = devices.location_id
+            JOIN countries ON countries.id = locations.country_id
+        """
+        conditions = []
+        params: list[int | str] = []
+        if country_id is not None:
+            conditions.append("countries.id = ?")
+            params.append(country_id)
+        if location_id is not None:
+            conditions.append("locations.id = ?")
+            params.append(location_id)
+        if device_query:
+            conditions.append(
+                """
+                (
+                    LOWER(devices.name) LIKE ?
+                    OR LOWER(COALESCE(devices.serial, '')) LIKE ?
+                    OR LOWER(device_types.name) LIKE ?
+                )
+                """
+            )
+            search = f"%{device_query.lower()}%"
+            params.extend((search, search, search))
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += """
+            ORDER BY countries.name,
+                     locations.name,
+                     device_types.name,
+                     devices.name,
+                     devices.serial
+        """
+        return self.connection.execute(query, tuple(params)).fetchall()
+
     def list_device_transfers(self):
         return self.connection.execute(
             """

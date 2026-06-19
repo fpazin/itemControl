@@ -9,7 +9,7 @@ from .database import open_database_connection
 from .domain import DatabaseOpenError
 
 
-DEVICE_MODULE_VERSION = 1
+DEVICE_MODULE_VERSION = 2
 
 DEVICE_STATUSES = (
     "Em uso",
@@ -166,12 +166,14 @@ class SQLiteRepository:
 
             CREATE TABLE IF NOT EXISTS device_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE
+                name TEXT NOT NULL UNIQUE,
+                is_active INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS device_types (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE
+                name TEXT NOT NULL UNIQUE,
+                is_active INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS devices (
@@ -194,8 +196,8 @@ class SQLiteRepository:
                 FOREIGN KEY(user_id) REFERENCES device_users(id) ON DELETE SET NULL,
                 FOREIGN KEY(location_id) REFERENCES locations(id) ON DELETE RESTRICT,
                 CHECK(
-                    (status = 'Disponível' AND user_id IS NULL)
-                    OR (status <> 'Disponível' AND user_id IS NOT NULL)
+                    (status = 'Em uso' AND user_id IS NOT NULL)
+                    OR (status <> 'Em uso' AND user_id IS NULL)
                 )
             );
 
@@ -218,6 +220,7 @@ class SQLiteRepository:
             );
             """
         )
+        self._apply_device_migrations()
         self.connection.execute(
             """
             INSERT INTO schema_versions (name, value)
@@ -306,6 +309,121 @@ class SQLiteRepository:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def update_device_user_name(self, user_id: int, name: str) -> None:
+        self.connection.execute(
+            "UPDATE device_users SET name = ? WHERE id = ?",
+            (name, user_id),
+        )
+        self.connection.commit()
+
+    def update_device_type_name(self, type_id: int, name: str) -> None:
+        self.connection.execute(
+            "UPDATE device_types SET name = ? WHERE id = ?",
+            (name, type_id),
+        )
+        self.connection.commit()
+
+    def set_device_user_active(self, user_id: int, is_active: bool) -> None:
+        self.connection.execute(
+            "UPDATE device_users SET is_active = ? WHERE id = ?",
+            (1 if is_active else 0, user_id),
+        )
+        self.connection.commit()
+
+    def set_device_type_active(self, type_id: int, is_active: bool) -> None:
+        self.connection.execute(
+            "UPDATE device_types SET is_active = ? WHERE id = ?",
+            (1 if is_active else 0, type_id),
+        )
+        self.connection.commit()
+
+    def _apply_device_migrations(self) -> None:
+        user_columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(device_users)").fetchall()
+        }
+        if "is_active" not in user_columns:
+            self.connection.execute(
+                "ALTER TABLE device_users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+            )
+
+        type_columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(device_types)").fetchall()
+        }
+        if "is_active" not in type_columns:
+            self.connection.execute(
+                "ALTER TABLE device_types ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+            )
+
+        current_version = self.device_schema_version()
+        if current_version != DEVICE_MODULE_VERSION:
+            self._rebuild_devices_table_for_v2()
+
+    def _rebuild_devices_table_for_v2(self) -> None:
+        self.connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self.connection.executescript(
+                """
+                DROP TABLE IF EXISTS devices_v2;
+
+                CREATE TABLE devices_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    serial TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    device_type_id INTEGER NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'Em uso',
+                        'Disponível',
+                        'Decommissionado',
+                        'Desativado'
+                    )),
+                    user_id INTEGER,
+                    location_id INTEGER NOT NULL,
+                    note TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(device_type_id) REFERENCES device_types(id) ON DELETE RESTRICT,
+                    FOREIGN KEY(user_id) REFERENCES device_users(id) ON DELETE SET NULL,
+                    FOREIGN KEY(location_id) REFERENCES locations(id) ON DELETE RESTRICT,
+                    CHECK(
+                        (status = 'Em uso' AND user_id IS NOT NULL)
+                        OR (status <> 'Em uso' AND user_id IS NULL)
+                    )
+                );
+
+                INSERT INTO devices_v2 (
+                    id,
+                    serial,
+                    name,
+                    device_type_id,
+                    status,
+                    user_id,
+                    location_id,
+                    note,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    id,
+                    serial,
+                    name,
+                    device_type_id,
+                    status,
+                    CASE WHEN status = 'Em uso' THEN user_id ELSE NULL END,
+                    location_id,
+                    note,
+                    created_at,
+                    updated_at
+                FROM devices;
+
+                DROP TABLE devices;
+                ALTER TABLE devices_v2 RENAME TO devices;
+                """
+            )
+        finally:
+            self.connection.execute("PRAGMA foreign_keys = ON")
+
     def create_device(
         self,
         serial: str,
@@ -332,9 +450,24 @@ class SQLiteRepository:
             "SELECT * FROM countries WHERE id = ?", (country_id,)
         ).fetchone()
 
+    def get_country_by_name(self, name: str):
+        return self.connection.execute(
+            "SELECT * FROM countries WHERE LOWER(name) = LOWER(?)",
+            (name,),
+        ).fetchone()
+
     def get_location(self, location_id: int):
         return self.connection.execute(
             "SELECT * FROM locations WHERE id = ?", (location_id,)
+        ).fetchone()
+
+    def get_location_by_country_and_name(self, country_id: int, name: str):
+        return self.connection.execute(
+            """
+            SELECT * FROM locations
+            WHERE country_id = ? AND LOWER(name) = LOWER(?)
+            """,
+            (country_id, name),
         ).fetchone()
 
     def get_item(self, item_id: int):
@@ -353,10 +486,22 @@ class SQLiteRepository:
             (user_id,),
         ).fetchone()
 
+    def get_device_user_by_name(self, name: str):
+        return self.connection.execute(
+            "SELECT * FROM device_users WHERE LOWER(name) = LOWER(?)",
+            (name,),
+        ).fetchone()
+
     def get_device_type(self, type_id: int):
         return self.connection.execute(
             "SELECT * FROM device_types WHERE id = ?",
             (type_id,),
+        ).fetchone()
+
+    def get_device_type_by_name(self, name: str):
+        return self.connection.execute(
+            "SELECT * FROM device_types WHERE LOWER(name) = LOWER(?)",
+            (name,),
         ).fetchone()
 
     def get_device(self, device_id: int):
@@ -369,6 +514,21 @@ class SQLiteRepository:
         return self.connection.execute(
             "SELECT * FROM devices WHERE serial = ?",
             (serial,),
+        ).fetchone()
+
+    def get_device_by_serial_casefold(self, serial: str):
+        return self.connection.execute(
+            "SELECT * FROM devices WHERE LOWER(serial) = LOWER(?)",
+            (serial,),
+        ).fetchone()
+
+    def get_device_by_serial_casefold_excluding(self, serial: str, device_id: int):
+        return self.connection.execute(
+            """
+            SELECT * FROM devices
+            WHERE LOWER(serial) = LOWER(?) AND id <> ?
+            """,
+            (serial, device_id),
         ).fetchone()
 
     def get_stock(self, item_id: int, location_id: int) -> int:
@@ -447,9 +607,19 @@ class SQLiteRepository:
             "SELECT * FROM device_users ORDER BY name"
         ).fetchall()
 
+    def list_active_device_users(self):
+        return self.connection.execute(
+            "SELECT * FROM device_users WHERE is_active = 1 ORDER BY name"
+        ).fetchall()
+
     def list_device_types(self):
         return self.connection.execute(
             "SELECT * FROM device_types ORDER BY name"
+        ).fetchall()
+
+    def list_active_device_types(self):
+        return self.connection.execute(
+            "SELECT * FROM device_types WHERE is_active = 1 ORDER BY name"
         ).fetchall()
 
     def list_devices(self):
@@ -457,7 +627,9 @@ class SQLiteRepository:
             """
             SELECT devices.*,
                    device_users.name AS user_name,
+                   device_users.is_active AS user_is_active,
                    device_types.name AS device_type_name,
+                   device_types.is_active AS device_type_is_active,
                    locations.name AS location_name,
                    countries.name AS country_name
             FROM devices
@@ -628,6 +800,42 @@ class SQLiteRepository:
             WHERE id = ?
             """,
             (status, device_type_id, user_id, location_id, note, device_id),
+        )
+
+    def update_device_details(
+        self,
+        device_id: int,
+        serial: str,
+        name: str,
+        device_type_id: int,
+        status: str,
+        location_id: int,
+        user_id: int | None,
+        note: str | None = None,
+    ) -> None:
+        self.connection.execute(
+            """
+            UPDATE devices
+            SET serial = ?,
+                name = ?,
+                device_type_id = ?,
+                status = ?,
+                user_id = ?,
+                location_id = ?,
+                note = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                serial,
+                name,
+                device_type_id,
+                status,
+                user_id,
+                location_id,
+                note,
+                device_id,
+            ),
         )
 
     def add_device_transfer(

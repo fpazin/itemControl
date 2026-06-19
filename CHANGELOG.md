@@ -2,6 +2,22 @@
 
 As principais mudancas de cada versao estavel do ItemControl sao registradas aqui.
 
+## [0.5.0] - 2026-06-19
+
+### Adicionado
+
+- Aba Devices reorganizada em lista, transferencias e cadastros, com novo Device em popup.
+- Edicao e desativacao/reativacao de Devices pela lista.
+- Edicao e inativacao/reativacao de usuarios e tipos sem apagar historico.
+- Criacao rapida de tipo, usuario e local dentro do formulario de Device.
+- Importacao em lote de Devices por CSV a partir da aba Devices.
+- Template CSV com colunas fixas para serial, nome, tipo, status, usuario, pais, local e observacao.
+- Preview editavel com aplicacao de valores padrao, validacao por linha e importacao parcial das linhas validas.
+
+### Removido
+
+- Nenhuma remocao.
+
 ## [0.4.1] - 2026-06-14
 
 ### Adicionado

@@ -4,7 +4,7 @@ Aplicativo desktop em Python para controle de ativos de TI entre países e local
 
 ## Versão atual
 
-**ItemControl 0.4.1**
+**ItemControl 0.5.0**
 
 Principais recursos desta versão:
 
@@ -14,7 +14,8 @@ Principais recursos desta versão:
 - Dashboard com visão geral e filtros de estoque;
 - Dashboard com visão de estoque e relacionamento de Devices;
 - gráficos de distribuição por país e pelos locais com maior estoque;
-- aba Devices com tipos cadastráveis e uso dos locais já existentes;
+- aba Devices reorganizada para lista, edição, transferências e cadastros auxiliares;
+- importação em lote de Devices por CSV com preview editável;
 - página `Sobre` com versão, desenvolvedor, repositório e downloads;
 - executável portátil para Windows x64.
 
@@ -81,6 +82,37 @@ A aba `Sobre` apresenta:
 - desenvolvedor: [Felipe Pazin](https://github.com/fpazin);
 - [repositório do projeto](https://github.com/fpazin/itemControl);
 - acesso às versões e downloads.
+
+## Devices
+
+A aba `Devices` concentra:
+
+- lista tabular de dispositivos cadastrados;
+- cadastro individual de Device por popup;
+- edição e desativação/reativação de Devices pela lista;
+- transferência de status, usuário e local;
+- cadastro auxiliar de usuários e tipos com inativação sem apagar histórico;
+- botão `Importar Devices CSV` para cadastrar Devices em lote.
+
+## Importação de Devices CSV
+
+O botão `Importar Devices CSV`, disponível na aba `Devices`, abre um fluxo para
+carregar um template CSV, revisar os dados e importar as linhas válidas.
+
+Colunas esperadas:
+
+```text
+serial,name,device_type,status,user,country,location,note
+```
+
+Regras principais:
+
+- `serial` é obrigatório e não pode existir na base nem se repetir no CSV;
+- `device_type` e `user` são criados automaticamente quando não existem;
+- `country` e `location` precisam estar cadastrados antes da importação;
+- somente status `Em uso` exige usuário;
+- status `Disponivel`, `Disponível`, `Desativado` e `Decommissionado` deixam o Device sem usuário;
+- linhas válidas são importadas mesmo quando outras linhas do arquivo têm erro.
 
 ## Testes
 

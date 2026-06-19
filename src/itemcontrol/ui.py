@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import csv
+import io
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
@@ -15,6 +18,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -35,7 +39,7 @@ from .dashboard import DashboardPage
 from .database import encrypt_plaintext_database
 from .domain import ItemControlError
 from .repository import DEVICE_MODULE_VERSION, DEVICE_STATUSES, SQLiteRepository
-from .service import InventoryService
+from .service import DEVICE_IMPORT_COLUMNS, InventoryService
 from .settings import add_recent_database, load_recent_databases
 
 
@@ -82,35 +86,337 @@ class AboutPage(QWidget):
         return label
 
 
-class DeviceModulePage(QWidget):
+class NameEditDialog(QDialog):
     def __init__(
-        self, service: InventoryService, parent: QWidget | None = None
+        self,
+        title: str,
+        label: str,
+        value: str = "",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.name_input = QLineEdit(value)
+
+        form = QFormLayout()
+        form.addRow(label, self.name_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def name(self) -> str:
+        return self.name_input.text().strip()
+
+    def accept(self) -> None:
+        if not self.name():
+            QMessageBox.warning(self, "ItemControl", "Informe um nome.")
+            return
+        super().accept()
+
+
+class LocationQuickCreateDialog(QDialog):
+    def __init__(
+        self,
+        service: InventoryService,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.service = service
+        self.created_location_id: int | None = None
+        self.setWindowTitle("Novo local")
 
-        self.users_list = QListWidget()
-        self.types_list = QListWidget()
-        self.devices_list = QListWidget()
+        self.country_combo = QComboBox()
+        for country in self.service.countries():
+            self.country_combo.addItem(country["name"], country["id"])
+        self.location_input = QLineEdit()
+
+        form = QFormLayout()
+        form.addRow("Pais", self.country_combo)
+        form.addRow("Local", self.location_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def accept(self) -> None:
+        country_id = self.country_combo.currentData()
+        if country_id is None:
+            QMessageBox.warning(self, "ItemControl", "Selecione um pais.")
+            return
+        try:
+            self.created_location_id = self.service.create_location(
+                int(country_id),
+                self.location_input.text(),
+            )
+        except ItemControlError as exc:
+            QMessageBox.warning(self, "ItemControl", str(exc))
+            return
+        super().accept()
+
+
+class DeviceFormDialog(QDialog):
+    def __init__(
+        self,
+        service: InventoryService,
+        device: dict | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.service = service
+        self.device = device
+        self.saved = False
+        self.setWindowTitle("Editar Device" if device else "Novo Device")
+        self.resize(560, 360)
+
+        self.serial_input = QLineEdit(device["serial"] if device else "")
+        self.name_input = QLineEdit(device["name"] if device else "")
+        self.type_combo = QComboBox()
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(DEVICE_STATUSES)
+        self.user_combo = QComboBox()
+        self.location_combo = QComboBox()
+        self.note_input = QLineEdit(device["note"] or "" if device else "")
+
+        self.type_add_button = QPushButton("+")
+        self.type_add_button.setToolTip("Cadastrar novo tipo")
+        self.type_add_button.clicked.connect(self.create_type)
+        self.user_add_button = QPushButton("+")
+        self.user_add_button.setToolTip("Cadastrar novo usuario")
+        self.user_add_button.clicked.connect(self.create_user)
+        self.location_add_button = QPushButton("+")
+        self.location_add_button.setToolTip("Cadastrar novo local")
+        self.location_add_button.clicked.connect(self.create_location)
+
+        type_row = QHBoxLayout()
+        type_row.addWidget(self.type_combo, 1)
+        type_row.addWidget(self.type_add_button)
+        user_row = QHBoxLayout()
+        user_row.addWidget(self.user_combo, 1)
+        user_row.addWidget(self.user_add_button)
+        location_row = QHBoxLayout()
+        location_row.addWidget(self.location_combo, 1)
+        location_row.addWidget(self.location_add_button)
+
+        form = QFormLayout()
+        form.addRow("Serial", self.serial_input)
+        form.addRow("Nome", self.name_input)
+        form.addRow("Tipo", type_row)
+        form.addRow("Status", self.status_combo)
+        form.addRow("Usuario", user_row)
+        form.addRow("Local", location_row)
+        form.addRow("Observacao", self.note_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+        self.status_combo.currentTextChanged.connect(self._status_changed)
+        self.load_options()
+        if device is not None:
+            self._select_current_values(device)
+        self._status_changed(self.status_combo.currentText())
+
+    @staticmethod
+    def _selected_id(combo: QComboBox) -> int | None:
+        data = combo.currentData()
+        return None if data is None else int(data)
+
+    @staticmethod
+    def _load_combo(combo: QComboBox, rows, label_builder, allow_blank: bool = False) -> None:
+        current = combo.currentData()
+        combo.clear()
+        if allow_blank:
+            combo.addItem("Sem usuario", None)
+        for row in rows:
+            combo.addItem(label_builder(row), row["id"])
+        if current is not None:
+            index = combo.findData(current)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+    def _option_rows_with_current(self, active_rows, all_rows, current_id: int | None):
+        rows = list(active_rows)
+        if current_id is not None and all(row["id"] != current_id for row in rows):
+            current_row = next((row for row in all_rows if row["id"] == current_id), None)
+            if current_row is not None:
+                rows.append(current_row)
+        return rows
+
+    def load_options(self) -> None:
+        current_type_id = int(self.device["device_type_id"]) if self.device else None
+        current_user_id = self.device["user_id"] if self.device else None
+        active_types = self.service.active_device_types()
+        active_users = self.service.active_device_users()
+        all_types = self.service.device_types()
+        all_users = self.service.device_users()
+        type_rows = self._option_rows_with_current(active_types, all_types, current_type_id)
+        user_rows = self._option_rows_with_current(active_users, all_users, current_user_id)
+        self._load_combo(
+            self.type_combo,
+            type_rows,
+            lambda row: row["name"] if row.get("is_active", 1) else f"{row['name']} (inativo)",
+        )
+        self._load_combo(
+            self.user_combo,
+            user_rows,
+            lambda row: row["name"] if row.get("is_active", 1) else f"{row['name']} (inativo)",
+            True,
+        )
+        self._load_combo(
+            self.location_combo,
+            self.service.locations(),
+            lambda row: f"{row['country_name']} - {row['name']}",
+        )
+
+    def _select_current_values(self, device: dict) -> None:
+        for combo, key in (
+            (self.type_combo, "device_type_id"),
+            (self.user_combo, "user_id"),
+            (self.location_combo, "location_id"),
+        ):
+            value = device[key]
+            if value is not None:
+                index = combo.findData(value)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        status_index = self.status_combo.findText(device["status"])
+        if status_index >= 0:
+            self.status_combo.setCurrentIndex(status_index)
+
+    def _status_changed(self, status: str) -> None:
+        requires_user = status == "Em uso"
+        self.user_combo.setEnabled(requires_user)
+        self.user_add_button.setEnabled(requires_user)
+        if not requires_user:
+            self.user_combo.setCurrentIndex(0)
+
+    def create_type(self) -> None:
+        dialog = NameEditDialog("Novo tipo", "Tipo", parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            type_id = self.service.create_device_type(dialog.name())
+        except ItemControlError as exc:
+            QMessageBox.warning(self, "ItemControl", str(exc))
+            return
+        self.load_options()
+        index = self.type_combo.findData(type_id)
+        if index >= 0:
+            self.type_combo.setCurrentIndex(index)
+
+    def create_user(self) -> None:
+        dialog = NameEditDialog("Novo usuario", "Usuario", parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            user_id = self.service.create_device_user(dialog.name())
+        except ItemControlError as exc:
+            QMessageBox.warning(self, "ItemControl", str(exc))
+            return
+        self.load_options()
+        index = self.user_combo.findData(user_id)
+        if index >= 0:
+            self.user_combo.setCurrentIndex(index)
+
+    def create_location(self) -> None:
+        dialog = LocationQuickCreateDialog(self.service, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self.load_options()
+        if dialog.created_location_id is not None:
+            index = self.location_combo.findData(dialog.created_location_id)
+            if index >= 0:
+                self.location_combo.setCurrentIndex(index)
+
+    def save(self) -> None:
+        device_type_id = self._selected_id(self.type_combo)
+        location_id = self._selected_id(self.location_combo)
+        user_id = self._selected_id(self.user_combo)
+        if device_type_id is None or location_id is None:
+            QMessageBox.warning(self, "ItemControl", "Selecione tipo e local.")
+            return
+        try:
+            if self.device is None:
+                self.service.create_device(
+                    self.serial_input.text(),
+                    self.name_input.text(),
+                    device_type_id,
+                    self.status_combo.currentText(),
+                    location_id,
+                    user_id,
+                    self.note_input.text(),
+                )
+            else:
+                self.service.update_device_details(
+                    int(self.device["id"]),
+                    self.serial_input.text(),
+                    self.name_input.text(),
+                    device_type_id,
+                    self.status_combo.currentText(),
+                    location_id,
+                    user_id,
+                    self.note_input.text(),
+                )
+        except ItemControlError as exc:
+            QMessageBox.warning(self, "ItemControl", str(exc))
+            return
+        self.saved = True
+        self.accept()
+
+
+class DeviceModulePage(QWidget):
+    def __init__(
+        self,
+        service: InventoryService,
+        import_devices_callback=None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.service = service
+        self.import_devices_callback = import_devices_callback
+
+        self.users_table = QTableWidget()
+        self.types_table = QTableWidget()
+        self.devices_table = QTableWidget()
         self.transfers_list = QListWidget()
 
-        self.user_name_input = QLineEdit()
-        self.user_add_button = QPushButton("Cadastrar usuario")
-        self.user_add_button.clicked.connect(self.create_user)
+        self.device_new_button = QPushButton("Novo")
+        self.device_new_button.clicked.connect(self.open_new_device)
+        self.device_edit_button = QPushButton("Editar")
+        self.device_edit_button.clicked.connect(self.open_selected_device)
+        self.device_toggle_button = QPushButton("Desativar/Reativar")
+        self.device_toggle_button.clicked.connect(self.toggle_selected_device)
+        self.device_refresh_button = QPushButton("Atualizar")
+        self.device_refresh_button.clicked.connect(self.refresh)
+        self.device_import_button = QPushButton("Importar Devices CSV")
+        self.device_import_button.clicked.connect(self._open_import)
 
-        self.type_name_input = QLineEdit()
-        self.type_add_button = QPushButton("Cadastrar tipo")
-        self.type_add_button.clicked.connect(self.create_type)
+        self.user_new_button = QPushButton("Novo")
+        self.user_new_button.clicked.connect(self.create_user)
+        self.user_edit_button = QPushButton("Editar")
+        self.user_edit_button.clicked.connect(self.edit_user)
+        self.user_toggle_button = QPushButton("Inativar/Reativar")
+        self.user_toggle_button.clicked.connect(self.toggle_user)
 
-        self.device_serial_input = QLineEdit()
-        self.device_name_input = QLineEdit()
-        self.device_type_combo = QComboBox()
-        self.device_status_combo = QComboBox()
-        self.device_status_combo.addItems(DEVICE_STATUSES)
-        self.device_user_combo = QComboBox()
-        self.device_location_combo = QComboBox()
-        self.device_add_button = QPushButton("Cadastrar dispositivo")
-        self.device_add_button.clicked.connect(self.create_device)
+        self.type_new_button = QPushButton("Novo")
+        self.type_new_button.clicked.connect(self.create_type)
+        self.type_edit_button = QPushButton("Editar")
+        self.type_edit_button.clicked.connect(self.edit_type)
+        self.type_toggle_button = QPushButton("Inativar/Reativar")
+        self.type_toggle_button.clicked.connect(self.toggle_type)
 
         self.transfer_device_combo = QComboBox()
         self.transfer_status_combo = QComboBox()
@@ -123,37 +429,28 @@ class DeviceModulePage(QWidget):
         self.transfer_button = QPushButton("Transferir dispositivo")
         self.transfer_button.clicked.connect(self.transfer_device)
 
-        layout = QGridLayout(self)
+        layout = QVBoxLayout(self)
+        self.device_tabs = QTabWidget()
+        layout.addWidget(self.device_tabs)
+        self._build_devices_table()
+        self._build_records_table(self.users_table)
+        self._build_records_table(self.types_table)
 
-        users_box = QGroupBox("Usuarios")
-        users_layout = QVBoxLayout(users_box)
-        users_form = QFormLayout()
-        users_form.addRow("Nome", self.user_name_input)
-        users_layout.addLayout(users_form)
-        users_layout.addWidget(self.user_add_button)
-        users_layout.addWidget(self.users_list)
+        list_page = QWidget()
+        list_layout = QVBoxLayout(list_page)
+        list_actions = QHBoxLayout()
+        list_actions.addWidget(self.device_new_button)
+        list_actions.addWidget(self.device_edit_button)
+        list_actions.addWidget(self.device_toggle_button)
+        list_actions.addWidget(self.device_refresh_button)
+        if import_devices_callback is not None:
+            list_actions.addWidget(self.device_import_button)
+        list_actions.addStretch()
+        list_layout.addLayout(list_actions)
+        list_layout.addWidget(self.devices_table, 1)
 
-        types_box = QGroupBox("Tipos")
-        types_layout = QVBoxLayout(types_box)
-        types_form = QFormLayout()
-        types_form.addRow("Nome", self.type_name_input)
-        types_layout.addLayout(types_form)
-        types_layout.addWidget(self.type_add_button)
-        types_layout.addWidget(self.types_list)
-
-        devices_box = QGroupBox("Dispositivos")
-        devices_layout = QVBoxLayout(devices_box)
-        devices_form = QFormLayout()
-        devices_form.addRow("Serial", self.device_serial_input)
-        devices_form.addRow("Nome", self.device_name_input)
-        devices_form.addRow("Tipo", self.device_type_combo)
-        devices_form.addRow("Status", self.device_status_combo)
-        devices_form.addRow("Usuario", self.device_user_combo)
-        devices_form.addRow("Local", self.device_location_combo)
-        devices_layout.addLayout(devices_form)
-        devices_layout.addWidget(self.device_add_button)
-        devices_layout.addWidget(self.devices_list)
-
+        transfers_page = QWidget()
+        transfer_page_layout = QVBoxLayout(transfers_page)
         transfer_box = QGroupBox("Transferencia")
         transfer_layout = QVBoxLayout(transfer_box)
         transfer_form = QFormLayout()
@@ -164,17 +461,68 @@ class DeviceModulePage(QWidget):
         transfer_form.addRow("Observacao", self.transfer_note_input)
         transfer_layout.addLayout(transfer_form)
         transfer_layout.addWidget(self.transfer_button)
-        transfer_layout.addWidget(self.transfers_list)
+        transfer_page_layout.addWidget(transfer_box)
+        transfer_page_layout.addWidget(self.transfers_list, 1)
 
-        layout.addWidget(users_box, 0, 0)
-        layout.addWidget(types_box, 0, 1)
-        layout.addWidget(devices_box, 1, 0, 1, 2)
-        layout.addWidget(transfer_box, 2, 0, 1, 2)
+        records_page = QWidget()
+        records_layout = QGridLayout(records_page)
+        users_box = QGroupBox("Usuarios")
+        users_layout = QVBoxLayout(users_box)
+        users_actions = QHBoxLayout()
+        users_actions.addWidget(self.user_new_button)
+        users_actions.addWidget(self.user_edit_button)
+        users_actions.addWidget(self.user_toggle_button)
+        users_actions.addStretch()
+        users_layout.addLayout(users_actions)
+        users_layout.addWidget(self.users_table)
+
+        types_box = QGroupBox("Tipos")
+        types_layout = QVBoxLayout(types_box)
+        types_actions = QHBoxLayout()
+        types_actions.addWidget(self.type_new_button)
+        types_actions.addWidget(self.type_edit_button)
+        types_actions.addWidget(self.type_toggle_button)
+        types_actions.addStretch()
+        types_layout.addLayout(types_actions)
+        types_layout.addWidget(self.types_table)
+
+        records_layout.addWidget(users_box, 0, 0)
+        records_layout.addWidget(types_box, 0, 1)
+
+        self.device_tabs.addTab(list_page, "Lista")
+        self.device_tabs.addTab(transfers_page, "Transferencias")
+        self.device_tabs.addTab(records_page, "Cadastros")
 
         self.refresh()
 
     def set_service(self, service: InventoryService) -> None:
         self.service = service
+
+    def _build_devices_table(self) -> None:
+        self.devices_table.setColumnCount(7)
+        self.devices_table.setHorizontalHeaderLabels(
+            ["Serial", "Nome", "Tipo", "Status", "Usuario", "Pais", "Local"]
+        )
+        self.devices_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.devices_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.devices_table.setSortingEnabled(True)
+        self.devices_table.itemDoubleClicked.connect(
+            lambda _item: self.open_selected_device()
+        )
+        header = self.devices_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        self.devices_table.setMinimumHeight(360)
+
+    def _build_records_table(self, table: QTableWidget) -> None:
+        table.setColumnCount(2)
+        table.setHorizontalHeaderLabels(["Nome", "Status"])
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSortingEnabled(True)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
     @staticmethod
     def _selected_id(combo: QComboBox) -> int | None:
@@ -187,6 +535,10 @@ class DeviceModulePage(QWidget):
         handler = getattr(window, handler_name, None)
         if callable(handler):
             handler(message)
+
+    def _open_import(self) -> None:
+        if callable(self.import_devices_callback):
+            self.import_devices_callback()
 
     def _load_combo(self, combo: QComboBox, rows, label_builder, allow_blank: bool = False) -> None:
         current = combo.currentData()
@@ -204,26 +556,15 @@ class DeviceModulePage(QWidget):
 
     def refresh(self) -> None:
         users = self.service.device_users()
+        active_users = self.service.active_device_users()
         types = self.service.device_types()
         devices = self.service.devices()
         transfers = self.service.device_transfers()
         locations = self.service.locations()
 
-        self.users_list.clear()
-        for row in users:
-            self.users_list.addItem(f"#{row['id']} {row['name']}")
-
-        self.types_list.clear()
-        for row in types:
-            self.types_list.addItem(f"#{row['id']} {row['name']}")
-
-        self.devices_list.clear()
-        for row in devices:
-            user_name = row["user_name"] or "-"
-            type_name = row["device_type_name"]
-            self.devices_list.addItem(
-                f"#{row['id']} {row['serial']} - {row['name']} | {type_name} | {row['status']} | {user_name} | {row['country_name']} / {row['location_name']}"
-            )
+        self._fill_records_table(self.users_table, users)
+        self._fill_records_table(self.types_table, types)
+        self._fill_devices_table(devices)
 
         self.transfers_list.clear()
         for row in transfers:
@@ -233,67 +574,243 @@ class DeviceModulePage(QWidget):
                 f"#{row['id']} {row['device_serial']} - {row['device_name']} | {row['device_type_name']} | {from_user} -> {to_user} | {row['from_location_name']} -> {row['to_location_name']} | {row['from_status']} -> {row['to_status']}"
             )
 
-        self._load_combo(self.device_user_combo, users, lambda r: r["name"], True)
-        self._load_combo(self.device_type_combo, types, lambda r: r["name"])
-        self._load_combo(
-            self.device_location_combo,
-            locations,
-            lambda r: f"{r['country_name']} - {r['name']}",
-        )
         self._load_combo(
             self.transfer_device_combo,
             devices,
             lambda r: f"{r['serial']} - {r['name']} ({r['device_type_name']})",
         )
-        self._load_combo(self.transfer_user_combo, users, lambda r: r["name"], True)
+        self._load_combo(self.transfer_user_combo, active_users, lambda r: r["name"], True)
         self._load_combo(
             self.transfer_location_combo,
             locations,
             lambda r: f"{r['country_name']} - {r['name']}",
         )
 
+    def _fill_devices_table(self, devices) -> None:
+        self.devices_table.setSortingEnabled(False)
+        self.devices_table.setRowCount(len(devices))
+        for row_index, row in enumerate(devices):
+            values = (
+                row["serial"],
+                row["name"],
+                row["device_type_name"],
+                row["status"],
+                row["user_name"] or "-",
+                row["country_name"],
+                row["location_name"],
+            )
+            for column_index, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setData(Qt.UserRole, row["id"])
+                self.devices_table.setItem(row_index, column_index, item)
+        self.devices_table.setSortingEnabled(True)
+
+    def _fill_records_table(self, table: QTableWidget, rows) -> None:
+        table.setSortingEnabled(False)
+        table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            name_item = QTableWidgetItem(str(row["name"]))
+            name_item.setData(Qt.UserRole, row["id"])
+            name_item.setData(Qt.UserRole + 1, int(row.get("is_active", 1)))
+            status_item = QTableWidgetItem(
+                "Ativo" if int(row.get("is_active", 1)) else "Inativo"
+            )
+            status_item.setData(Qt.UserRole, row["id"])
+            status_item.setData(Qt.UserRole + 1, int(row.get("is_active", 1)))
+            table.setItem(row_index, 0, name_item)
+            table.setItem(row_index, 1, status_item)
+        table.setSortingEnabled(True)
+
+    def _selected_table_id(self, table: QTableWidget) -> int | None:
+        selected = table.selectedItems()
+        if not selected:
+            return None
+        row = selected[0].row()
+        item = table.item(row, 0)
+        if item is None:
+            return None
+        data = item.data(Qt.UserRole)
+        return None if data is None else int(data)
+
+    def _selected_table_active(self, table: QTableWidget) -> bool | None:
+        selected = table.selectedItems()
+        if not selected:
+            return None
+        row = selected[0].row()
+        item = table.item(row, 0)
+        if item is None:
+            return None
+        data = item.data(Qt.UserRole + 1)
+        return None if data is None else bool(int(data))
+
+    def _device_by_id(self, device_id: int):
+        return next(
+            (row for row in self.service.devices() if int(row["id"]) == device_id),
+            None,
+        )
+
     def create_user(self) -> None:
+        dialog = NameEditDialog("Novo usuario", "Usuario", parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
         try:
-            self.service.create_device_user(self.user_name_input.text())
+            self.service.create_device_user(dialog.name())
         except ItemControlError as exc:
             self._notify(str(exc), error=True)
             return
-        self.user_name_input.clear()
-        self.refresh()
+        self._refresh_window()
         self._notify("Usuario cadastrado com sucesso.")
 
     def create_type(self) -> None:
+        dialog = NameEditDialog("Novo tipo", "Tipo", parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
         try:
-            self.service.create_device_type(self.type_name_input.text())
+            self.service.create_device_type(dialog.name())
         except ItemControlError as exc:
             self._notify(str(exc), error=True)
             return
-        self.type_name_input.clear()
-        self.refresh()
+        self._refresh_window()
         self._notify("Tipo cadastrado com sucesso.")
 
-    def create_device(self) -> None:
-        device_type_id = self._selected_id(self.device_type_combo)
-        location_id = self._selected_id(self.device_location_combo)
-        if device_type_id is None or location_id is None:
-            self._notify("Selecione tipo e local do dispositivo.", error=True)
+    def _refresh_window(self) -> None:
+        window = self.window()
+        refresh_all = getattr(window, "refresh_all", None)
+        if callable(refresh_all):
+            refresh_all()
+        else:
+            self.refresh()
+
+    def open_new_device(self) -> None:
+        dialog = DeviceFormDialog(self.service, parent=self)
+        if dialog.exec() != QDialog.Accepted or not dialog.saved:
+            return
+        self._refresh_window()
+        self._notify("Dispositivo cadastrado com sucesso.")
+
+    def open_selected_device(self) -> None:
+        device_id = self._selected_table_id(self.devices_table)
+        if device_id is None:
+            self._notify("Selecione um dispositivo.", error=True)
+            return
+        device = self._device_by_id(device_id)
+        if device is None:
+            self._notify("Dispositivo nao encontrado.", error=True)
+            return
+        dialog = DeviceFormDialog(self.service, device=device, parent=self)
+        if dialog.exec() != QDialog.Accepted or not dialog.saved:
+            return
+        self._refresh_window()
+        self._notify("Dispositivo atualizado com sucesso.")
+
+    def toggle_selected_device(self) -> None:
+        device_id = self._selected_table_id(self.devices_table)
+        if device_id is None:
+            self._notify("Selecione um dispositivo.", error=True)
+            return
+        device = self._device_by_id(device_id)
+        if device is None:
+            self._notify("Dispositivo nao encontrado.", error=True)
+            return
+        action = "reativar" if device["status"] == "Desativado" else "desativar"
+        answer = QMessageBox.question(
+            self,
+            "ItemControl",
+            f"Deseja {action} o device {device['serial']}?",
+        )
+        if answer != QMessageBox.Yes:
             return
         try:
-            self.service.create_device(
-                self.device_serial_input.text(),
-                self.device_name_input.text(),
-                device_type_id,
-                self.device_status_combo.currentText(),
-                location_id,
-                self._selected_id(self.device_user_combo),
-            )
+            new_status = self.service.toggle_device_deactivated(device_id)
         except ItemControlError as exc:
             self._notify(str(exc), error=True)
             return
-        self.device_serial_input.clear()
-        self.device_name_input.clear()
-        self.refresh()
-        self._notify("Dispositivo cadastrado com sucesso.")
+        self._refresh_window()
+        self._notify(f"Device atualizado para {new_status}.")
+
+    def edit_user(self) -> None:
+        user_id = self._selected_table_id(self.users_table)
+        if user_id is None:
+            self._notify("Selecione um usuario.", error=True)
+            return
+        user = next((row for row in self.service.device_users() if row["id"] == user_id), None)
+        if user is None:
+            self._notify("Usuario nao encontrado.", error=True)
+            return
+        dialog = NameEditDialog("Editar usuario", "Usuario", user["name"], self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            self.service.update_device_user_name(user_id, dialog.name())
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self._refresh_window()
+        self._notify("Usuario atualizado com sucesso.")
+
+    def edit_type(self) -> None:
+        type_id = self._selected_table_id(self.types_table)
+        if type_id is None:
+            self._notify("Selecione um tipo.", error=True)
+            return
+        device_type = next((row for row in self.service.device_types() if row["id"] == type_id), None)
+        if device_type is None:
+            self._notify("Tipo nao encontrado.", error=True)
+            return
+        dialog = NameEditDialog("Editar tipo", "Tipo", device_type["name"], self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            self.service.update_device_type_name(type_id, dialog.name())
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self._refresh_window()
+        self._notify("Tipo atualizado com sucesso.")
+
+    def toggle_user(self) -> None:
+        user_id = self._selected_table_id(self.users_table)
+        is_active = self._selected_table_active(self.users_table)
+        if user_id is None or is_active is None:
+            self._notify("Selecione um usuario.", error=True)
+            return
+        action = "inativar" if is_active else "reativar"
+        answer = QMessageBox.question(
+            self,
+            "ItemControl",
+            f"Deseja {action} este usuario?",
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            self.service.set_device_user_active(user_id, not is_active)
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self._refresh_window()
+        self._notify("Usuario atualizado com sucesso.")
+
+    def toggle_type(self) -> None:
+        type_id = self._selected_table_id(self.types_table)
+        is_active = self._selected_table_active(self.types_table)
+        if type_id is None or is_active is None:
+            self._notify("Selecione um tipo.", error=True)
+            return
+        action = "inativar" if is_active else "reativar"
+        answer = QMessageBox.question(
+            self,
+            "ItemControl",
+            f"Deseja {action} este tipo?",
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            self.service.set_device_type_active(type_id, not is_active)
+        except ItemControlError as exc:
+            self._notify(str(exc), error=True)
+            return
+        self._refresh_window()
+        self._notify("Tipo atualizado com sucesso.")
 
     def transfer_device(self) -> None:
         device_id = self._selected_id(self.transfer_device_combo)
@@ -315,6 +832,293 @@ class DeviceModulePage(QWidget):
         self.transfer_note_input.clear()
         self.refresh()
         self._notify("Dispositivo transferido com sucesso.")
+
+
+class DeviceCsvImportDialog(QDialog):
+    CSV_ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
+
+    def __init__(
+        self,
+        service: InventoryService,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.service = service
+        self.imported_count = 0
+        self.setWindowTitle("Importar Devices CSV")
+        self.resize(1080, 720)
+
+        self.path_input = QLineEdit()
+        self.path_input.setReadOnly(True)
+        browse_button = QPushButton("Selecionar CSV")
+        browse_button.clicked.connect(self.browse_csv)
+        template_button = QPushButton("Salvar template")
+        template_button.clicked.connect(self.save_template)
+
+        path_row = QHBoxLayout()
+        path_row.addWidget(self.path_input, 1)
+        path_row.addWidget(browse_button)
+        path_row.addWidget(template_button)
+
+        self.default_type_input = QLineEdit()
+        self.default_status_combo = QComboBox()
+        self.default_status_combo.addItem("", "")
+        self.default_status_combo.addItems(DEVICE_STATUSES)
+        self.default_user_input = QLineEdit()
+        self.default_country_input = QLineEdit()
+        self.default_location_input = QLineEdit()
+        self.default_note_input = QLineEdit()
+
+        defaults_form = QFormLayout()
+        defaults_form.addRow("Tipo", self.default_type_input)
+        defaults_form.addRow("Status", self.default_status_combo)
+        defaults_form.addRow("Usuario", self.default_user_input)
+        defaults_form.addRow("Pais", self.default_country_input)
+        defaults_form.addRow("Local", self.default_location_input)
+        defaults_form.addRow("Observacao", self.default_note_input)
+
+        defaults_box = QGroupBox("Padroes para campos vazios")
+        defaults_box.setLayout(defaults_form)
+
+        self.table = QTableWidget(0, len(DEVICE_IMPORT_COLUMNS) + 1)
+        self.table.setHorizontalHeaderLabels([*DEVICE_IMPORT_COLUMNS, "errors"])
+        self.table.setMinimumHeight(320)
+        self.table.setSortingEnabled(False)
+
+        apply_defaults_button = QPushButton("Aplicar padroes")
+        apply_defaults_button.clicked.connect(self.apply_defaults)
+        validate_button = QPushButton("Validar")
+        validate_button.clicked.connect(self.validate_rows)
+        import_button = QPushButton("Importar linhas validas")
+        import_button.clicked.connect(self.import_valid_rows)
+        close_button = QPushButton("Fechar")
+        close_button.clicked.connect(self.reject)
+
+        actions = QHBoxLayout()
+        actions.addWidget(apply_defaults_button)
+        actions.addWidget(validate_button)
+        actions.addWidget(import_button)
+        actions.addStretch()
+        actions.addWidget(close_button)
+
+        self.summary_label = QLabel("Nenhum CSV carregado.")
+        self.report_area = QTextEdit()
+        self.report_area.setReadOnly(True)
+        self.report_area.setMinimumHeight(140)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Colunas esperadas: " + ", ".join(DEVICE_IMPORT_COLUMNS)))
+        layout.addLayout(path_row)
+        layout.addWidget(defaults_box)
+        layout.addWidget(self.table, 1)
+        layout.addLayout(actions)
+        layout.addWidget(self.summary_label)
+        layout.addWidget(self.report_area)
+
+    def browse_csv(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Selecionar CSV de Devices",
+            "",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if filename:
+            self.load_csv(filename)
+
+    def save_template(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Salvar template CSV",
+            "devices-template.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not filename:
+            return
+        try:
+            with open(filename, "w", encoding="utf-8-sig", newline="") as csv_file:
+                writer = csv.DictWriter(
+                    csv_file,
+                    fieldnames=DEVICE_IMPORT_COLUMNS,
+                    delimiter=";",
+                )
+                writer.writeheader()
+        except OSError as exc:
+            QMessageBox.warning(self, "ItemControl", f"Nao foi possivel salvar: {exc}")
+            return
+        QMessageBox.information(self, "ItemControl", "Template CSV salvo com sucesso.")
+
+    def load_csv(self, filename: str) -> None:
+        try:
+            read_result = self._read_device_csv(filename)
+        except (OSError, UnicodeDecodeError, csv.Error) as exc:
+            QMessageBox.warning(
+                self,
+                "ItemControl",
+                (
+                    "Nao foi possivel ler o CSV. Use um arquivo CSV UTF-8 ou "
+                    f"Windows/Excel ANSI. Detalhes: {exc}"
+                ),
+            )
+            return
+
+        fieldnames = read_result["fieldnames"]
+        missing = [column for column in DEVICE_IMPORT_COLUMNS if column not in fieldnames]
+        if missing:
+            QMessageBox.warning(
+                self,
+                "ItemControl",
+                "CSV sem colunas obrigatorias: " + ", ".join(missing),
+            )
+            return
+
+        rows = read_result["rows"]
+        self.path_input.setText(filename)
+        self._fill_table(rows)
+        delimiter_name = "ponto e virgula" if read_result["delimiter"] == ";" else "virgula"
+        self.summary_label.setText(
+            (
+                f"{len(rows)} linhas carregadas. "
+                f"Encoding: {read_result['encoding']}; separador: {delimiter_name}."
+            )
+        )
+        self.report_area.clear()
+        if rows:
+            self.validate_rows()
+
+    @classmethod
+    def _read_device_csv(cls, filename: str) -> dict:
+        last_error: Exception | None = None
+        for encoding in cls.CSV_ENCODINGS:
+            try:
+                with open(filename, "r", encoding=encoding, newline="") as csv_file:
+                    content = csv_file.read()
+            except UnicodeDecodeError as exc:
+                last_error = exc
+                continue
+
+            delimiter = cls._detect_csv_delimiter(content)
+            reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
+            rows = [
+                {
+                    column: (source_row.get(column) or "").strip()
+                    for column in DEVICE_IMPORT_COLUMNS
+                }
+                for source_row in reader
+            ]
+            return {
+                "rows": rows,
+                "fieldnames": reader.fieldnames or [],
+                "encoding": encoding,
+                "delimiter": delimiter,
+            }
+        if last_error is not None:
+            raise last_error
+        raise UnicodeDecodeError("csv", b"", 0, 1, "could not decode file")
+
+    @staticmethod
+    def _detect_csv_delimiter(content: str) -> str:
+        for line in content.splitlines():
+            if line.strip():
+                return ";" if line.count(";") >= line.count(",") else ","
+        return ","
+
+    def _fill_table(self, rows: list[dict[str, str]]) -> None:
+        self.table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            for column_index, column in enumerate(DEVICE_IMPORT_COLUMNS):
+                self.table.setItem(
+                    row_index,
+                    column_index,
+                    QTableWidgetItem(row.get(column, "")),
+                )
+            self._set_error_cell(row_index, "")
+
+    def _set_error_cell(self, row_index: int, text: str) -> None:
+        item = QTableWidgetItem(text)
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        self.table.setItem(row_index, len(DEVICE_IMPORT_COLUMNS), item)
+
+    def _rows_from_table(self) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for row_index in range(self.table.rowCount()):
+            row = {}
+            for column_index, column in enumerate(DEVICE_IMPORT_COLUMNS):
+                item = self.table.item(row_index, column_index)
+                row[column] = item.text().strip() if item is not None else ""
+            rows.append(row)
+        return rows
+
+    def apply_defaults(self) -> None:
+        defaults = {
+            "device_type": self.default_type_input.text().strip(),
+            "status": self.default_status_combo.currentText().strip(),
+            "user": self.default_user_input.text().strip(),
+            "country": self.default_country_input.text().strip(),
+            "location": self.default_location_input.text().strip(),
+            "note": self.default_note_input.text().strip(),
+        }
+        for row_index in range(self.table.rowCount()):
+            for column, value in defaults.items():
+                if not value:
+                    continue
+                column_index = DEVICE_IMPORT_COLUMNS.index(column)
+                item = self.table.item(row_index, column_index)
+                if item is None:
+                    item = QTableWidgetItem("")
+                    self.table.setItem(row_index, column_index, item)
+                if not item.text().strip():
+                    item.setText(value)
+        self.validate_rows()
+
+    def validate_rows(self) -> None:
+        rows = self._rows_from_table()
+        if not rows:
+            self.summary_label.setText("Nenhuma linha para validar.")
+            self.report_area.clear()
+            return
+        result = self.service.validate_device_import_rows(rows)
+        self._apply_validation_result(result, imported=False)
+
+    def import_valid_rows(self) -> None:
+        rows = self._rows_from_table()
+        if not rows:
+            QMessageBox.warning(self, "ItemControl", "Nenhuma linha para importar.")
+            return
+        result = self.service.import_device_rows(rows)
+        self.imported_count += int(result["imported"])
+        self._apply_validation_result(result, imported=True)
+        QMessageBox.information(
+            self,
+            "ItemControl",
+            (
+                f"Importacao concluida. Importados: {result['imported']}. "
+                f"Invalidos/ignorados: {result['invalid']}."
+            ),
+        )
+
+    def _apply_validation_result(self, result: dict, imported: bool) -> None:
+        report_lines = []
+        for row_result in result["rows"]:
+            errors = row_result["errors"]
+            error_text = "; ".join(errors)
+            if row_result.get("imported"):
+                error_text = "Importado."
+            self._set_error_cell(int(row_result["row"]) - 1, error_text)
+            if errors:
+                csv_line = int(row_result["row"]) + 1
+                report_lines.append(
+                    f"Linha {csv_line}: " + "; ".join(errors)
+                )
+
+        action = "Importacao" if imported else "Validacao"
+        self.summary_label.setText(
+            (
+                f"{action}: {result['total']} linhas, "
+                f"{result['valid']} validas, {result['invalid']} invalidas, "
+                f"{result['imported']} importadas."
+            )
+        )
+        self.report_area.setPlainText("\n".join(report_lines))
 
 
 class PasswordConfirmationDialog(QDialog):
@@ -529,7 +1333,11 @@ class MainWindow(QMainWindow):
         self.item_distribution_button.clicked.connect(self.refresh_item_distribution)
 
         self.dashboard_page = DashboardPage(self.service)
-        self.device_page = DeviceModulePage(self.service) if device_module_enabled else None
+        self.device_page = (
+            DeviceModulePage(self.service, import_devices_callback=self.open_device_import)
+            if device_module_enabled
+            else None
+        )
 
         self._build_tabs()
         self._build_menu()
@@ -636,6 +1444,16 @@ class MainWindow(QMainWindow):
 
     def show_info(self, message: str) -> None:
         self.status_area.append(message)
+
+    def open_device_import(self) -> None:
+        if not self.device_module_enabled or not self.service.repository.has_device_schema():
+            self.show_error("A estrutura de Devices nao esta habilitada nesta base.")
+            return
+        dialog = DeviceCsvImportDialog(self.service, self)
+        dialog.exec()
+        if dialog.imported_count > 0:
+            self.refresh_all()
+            self.show_info(f"{dialog.imported_count} devices importados via CSV.")
 
     def protect_database(self) -> None:
         if self.database_password:

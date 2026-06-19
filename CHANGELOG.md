@@ -2,7 +2,7 @@
 
 As principais mudancas de cada versao estavel do ItemControl sao registradas aqui.
 
-## [0.5.0] - 2026-06-18
+## [0.5.0] - 2026-06-19
 
 ### Adicionado
 
